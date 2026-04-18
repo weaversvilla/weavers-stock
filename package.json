@@ -1,0 +1,9 @@
+{
+  "name": "weavers-stock-intelligence",
+  "version": "1.0.0",
+  "description": "Weavers Villa Stock Intelligence Dashboard",
+  "engines": { "node": "20.x" },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}

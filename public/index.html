@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Weavers Villa — Stock Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0a0f;
+  --surface:#12121a;
+  --surface2:#1a1a26;
+  --surface3:#22223a;
+  --border:#2a2a42;
+  --accent:#f0a500;
+  --accent2:#e05c5c;
+  --accent3:#5ce0a0;
+  --accent4:#5c9de0;
+  --text:#f0f0f8;
+  --text2:#9090b0;
+  --text3:#5a5a7a;
+  --font:'Syne',sans-serif;
+  --mono:'JetBrains Mono',monospace;
+  --r:8px;
+  --r2:14px;
+}
+html{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh}
+body{background:var(--bg);min-height:100vh}
+
+/* Grain overlay */
+body::before{
+  content:'';position:fixed;inset:0;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events:none;z-index:9999;opacity:0.6;
+}
+
+.app{max-width:1600px;margin:0 auto;padding:24px}
+
+/* Header */
+.header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:40px;flex-wrap:wrap;gap:16px}
+.logo{display:flex;flex-direction:column;gap:2px}
+.logo-name{font-size:28px;font-weight:800;letter-spacing:-0.5px;color:var(--text)}
+.logo-sub{font-size:12px;font-weight:600;letter-spacing:3px;text-transform:uppercase;color:var(--accent);font-family:var(--mono)}
+.header-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:8px;padding:10px 20px;border-radius:var(--r);font-family:var(--font);font-size:13px;font-weight:700;letter-spacing:0.5px;cursor:pointer;border:none;transition:all 0.15s;text-transform:uppercase}
+.btn-primary{background:var(--accent);color:#000}
+.btn-primary:hover{background:#f8b820;transform:translateY(-1px)}
+.btn-primary:disabled{opacity:0.5;cursor:not-allowed;transform:none}
+.btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border)}
+.btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+.btn-danger{background:var(--accent2);color:#fff}
+.btn-sm{padding:7px 14px;font-size:12px}
+
+/* Setup screen */
+.setup{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:80vh;gap:24px}
+.setup-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:40px;width:100%;max-width:480px}
+.setup-title{font-size:22px;font-weight:800;margin-bottom:8px}
+.setup-sub{color:var(--text2);font-size:14px;margin-bottom:28px;line-height:1.6}
+.input-group{display:flex;flex-direction:column;gap:8px;margin-bottom:20px}
+.input-label{font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text2)}
+.input{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:12px 16px;color:var(--text);font-family:var(--mono);font-size:13px;width:100%;outline:none;transition:border-color 0.15s}
+.input:focus{border-color:var(--accent)}
+.input::placeholder{color:var(--text3)}
+
+/* Summary cards */
+.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:28px}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:20px 22px;position:relative;overflow:hidden}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+.stat-card.oos::before{background:var(--accent2)}
+.stat-card.critical::before{background:#f07830}
+.stat-card.low::before{background:var(--accent)}
+.stat-card.watch::before{background:#a0a0ff}
+.stat-card.healthy::before{background:var(--accent3)}
+.stat-card.dead::before{background:var(--text3)}
+.stat-num{font-size:36px;font-weight:800;line-height:1;font-family:var(--mono)}
+.stat-card.oos .stat-num{color:var(--accent2)}
+.stat-card.critical .stat-num{color:#f07830}
+.stat-card.low .stat-num{color:var(--accent)}
+.stat-card.watch .stat-num{color:#a0a0ff}
+.stat-card.healthy .stat-num{color:var(--accent3)}
+.stat-card.dead .stat-num{color:var(--text3)}
+.stat-label{font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);margin-top:6px}
+
+/* Controls */
+.controls{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;align-items:center}
+.search-wrap{position:relative;flex:1;min-width:200px}
+.search-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text3);font-size:14px}
+.search{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:10px 12px 10px 36px;color:var(--text);font-family:var(--font);font-size:13px;outline:none}
+.search:focus{border-color:var(--accent)}
+.filter-btn{padding:9px 16px;border-radius:var(--r);font-family:var(--font);font-size:12px;font-weight:700;letter-spacing:0.5px;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text2);transition:all 0.15s;text-transform:uppercase}
+.filter-btn.active{background:var(--surface3);border-color:var(--accent);color:var(--accent)}
+.filter-btn:hover{border-color:var(--text2);color:var(--text)}
+
+/* Seasonal multiplier */
+.seasonal-bar{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 20px;display:flex;align-items:center;gap:20px;margin-bottom:20px;flex-wrap:wrap}
+.seasonal-label{font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text2)}
+.seasonal-val{font-family:var(--mono);font-size:18px;font-weight:700;color:var(--accent);min-width:40px}
+.range{accent-color:var(--accent);width:200px;cursor:pointer}
+
+/* Table */
+.table-wrap{overflow-x:auto;border-radius:var(--r2);border:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead{background:var(--surface2)}
+th{padding:13px 16px;text-align:left;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);white-space:nowrap;border-bottom:1px solid var(--border)}
+td{padding:13px 16px;border-bottom:1px solid var(--border);white-space:nowrap;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tbody tr{background:var(--surface);transition:background 0.1s}
+tbody tr:hover{background:var(--surface2)}
+tbody tr.dead-stock{opacity:0.55}
+
+.sku{font-family:var(--mono);font-size:12px;color:var(--text2)}
+.product-name{font-weight:600;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+
+/* Status badges */
+.badge{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase}
+.badge-dot{width:6px;height:6px;border-radius:50%}
+.badge.OUT_OF_STOCK{background:rgba(224,92,92,0.15);color:var(--accent2)}
+.badge.OUT_OF_STOCK .badge-dot{background:var(--accent2)}
+.badge.CRITICAL{background:rgba(240,120,48,0.15);color:#f07830}
+.badge.CRITICAL .badge-dot{background:#f07830}
+.badge.LOW{background:rgba(240,165,0,0.15);color:var(--accent)}
+.badge.LOW .badge-dot{background:var(--accent)}
+.badge.WATCH{background:rgba(160,160,255,0.15);color:#a0a0ff}
+.badge.WATCH .badge-dot{background:#a0a0ff}
+.badge.HEALTHY{background:rgba(92,224,160,0.12);color:var(--accent3)}
+.badge.HEALTHY .badge-dot{background:var(--accent3)}
+.badge.DEAD{background:rgba(90,90,122,0.2);color:var(--text3)}
+.badge.DEAD .badge-dot{background:var(--text3)}
+
+/* Platform pills */
+.platform-wrap{display:flex;gap:4px;flex-wrap:wrap}
+.platform-pill{padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;font-family:var(--mono)}
+.platform-pill.amazon{background:rgba(255,153,0,0.15);color:#ff9900}
+.platform-pill.flipkart{background:rgba(47,116,255,0.15);color:#2f74ff}
+.platform-pill.myntra{background:rgba(255,63,108,0.15);color:#ff3f6c}
+.platform-pill.ajio{background:rgba(0,200,150,0.15);color:#00c896}
+.platform-pill.others{background:rgba(160,160,160,0.15);color:#a0a0a0}
+
+/* Numbers */
+.num{font-family:var(--mono);font-size:13px}
+.num-highlight{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--accent)}
+.num-danger{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--accent2)}
+.num-good{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--accent3)}
+
+/* Order qty */
+.order-qty{display:inline-flex;align-items:center;justify-content:center;min-width:52px;padding:5px 10px;border-radius:6px;font-family:var(--mono);font-size:13px;font-weight:700}
+.order-qty.urgent{background:rgba(224,92,92,0.2);color:var(--accent2);border:1px solid rgba(224,92,92,0.3)}
+.order-qty.soon{background:rgba(240,165,0,0.15);color:var(--accent);border:1px solid rgba(240,165,0,0.3)}
+.order-qty.planned{background:rgba(92,224,160,0.08);color:var(--accent3);border:1px solid rgba(92,224,160,0.2)}
+.order-qty.zero{background:transparent;color:var(--text3)}
+
+/* Loading */
+.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:20px}
+.spinner{width:48px;height:48px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-text{color:var(--text2);font-family:var(--mono);font-size:13px}
+
+/* Timestamps */
+.meta-bar{display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap}
+.meta-text{font-family:var(--mono);font-size:12px;color:var(--text3)}
+.meta-text span{color:var(--text2)}
+
+/* Error */
+.error-box{background:rgba(224,92,92,0.1);border:1px solid rgba(224,92,92,0.3);border-radius:var(--r);padding:16px 20px;color:var(--accent2);font-size:14px;margin:20px 0}
+
+/* Empty */
+.empty{text-align:center;padding:60px 20px;color:var(--text3)}
+
+/* Tooltip on hover for name */
+td.name-cell{position:relative}
+td.name-cell:hover .tooltip{display:block}
+.tooltip{display:none;position:absolute;background:#222;border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px;white-space:nowrap;z-index:100;top:100%;left:0;color:var(--text)}
+
+@media(max-width:768px){
+  .app{padding:16px}
+  th:nth-child(n+7){display:none}
+  td:nth-child(n+7){display:none}
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useCallback, useMemo } = React;
+
+const API_BASE_KEY = "wv_api_base";
+const DEFAULT_API_BASE = "https://your-app.vercel.app";
+
+const STATUS_LABELS = {
+  OUT_OF_STOCK: "Out of Stock",
+  CRITICAL: "Critical",
+  LOW: "Low",
+  WATCH: "Watch",
+  HEALTHY: "Healthy",
+};
+
+function App() {
+  const [apiBase, setApiBase] = useState(() => localStorage.getItem(API_BASE_KEY) || "");
+  const [setupDone, setSetupDone] = useState(() => !!localStorage.getItem(API_BASE_KEY));
+  const [tempBase, setTempBase] = useState("");
+
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [lastFetch, setLastFetch] = useState(null);
+
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [platformFilter, setPlatformFilter] = useState("ALL");
+  const [deadFilter, setDeadFilter] = useState(false);
+  const [seasonalMult, setSeasonalMult] = useState(1.0);
+
+  const saveSetup = () => {
+    const base = tempBase.trim().replace(/\/$/, "");
+    if (!base) return;
+    localStorage.setItem(API_BASE_KEY, base);
+    setApiBase(base);
+    setSetupDone(true);
+  };
+
+  const fetchReport = useCallback(async () => {
+    if (!apiBase) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${apiBase}/api/report`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      setData(json);
+      setLastFetch(new Date());
+
+      // Save snapshot for seasonality
+      try {
+        await fetch(`${apiBase}/api/snapshot`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ products: json.products }),
+        });
+      } catch {}
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [apiBase]);
+
+  useEffect(() => {
+    if (setupDone && apiBase) fetchReport();
+  }, [setupDone]);
+
+  const filtered = useMemo(() => {
+    if (!data) return [];
+    return data.products.filter((p) => {
+      if (deadFilter && !p.isDeadStock) return false;
+      if (!deadFilter && statusFilter !== "ALL" && p.status !== statusFilter) return false;
+      if (platformFilter !== "ALL") {
+        const plat = platformFilter.toLowerCase();
+        if ((p.platformSales?.[plat] || 0) === 0) return false;
+      }
+      if (search) {
+        const s = search.toLowerCase();
+        if (!p.name?.toLowerCase().includes(s) && !p.sku?.toLowerCase().includes(s)) return false;
+      }
+      return true;
+    });
+  }, [data, statusFilter, platformFilter, deadFilter, search]);
+
+  const exportCSV = () => {
+    if (!data) return;
+    const headers = ["SKU","Name","Stock","Status","Days Left","Velocity/day","7d Sales","15d Sales","30d Sales","90d Sales","Returns 30d","Amazon 30d","Flipkart 30d","Myntra 30d","In-Transit Returns","Suggested Order","Dead Stock"];
+    const rows = filtered.map(p => [
+      p.sku, `"${p.name}"`, p.currentStock, p.status,
+      p.daysRemaining ?? "∞", p.dailyVelocity,
+      p.netSales?.d7, p.netSales?.d15, p.netSales?.d30, p.netSales?.d90,
+      p.returns?.d30 || 0,
+      p.platformSales?.amazon || 0, p.platformSales?.flipkart || 0, p.platformSales?.myntra || 0,
+      p.inTransitReturns || 0,
+      Math.ceil((p.suggestedOrder || 0) * seasonalMult),
+      p.isDeadStock ? "YES" : "NO"
+    ]);
+    const csv = [headers, ...rows].map(r => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `weavers-stock-${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  if (!setupDone) {
+    return (
+      <div className="app">
+        <div className="setup">
+          <div className="setup-card">
+            <div className="logo" style={{marginBottom:24}}>
+              <div className="logo-name">Weavers Villa</div>
+              <div className="logo-sub">Stock Intelligence</div>
+            </div>
+            <div className="setup-title">First-time Setup</div>
+            <div className="setup-sub">Enter your Vercel deployment URL. This is saved in your browser — you won't be asked again.</div>
+            <div className="input-group">
+              <label className="input-label">Vercel App URL</label>
+              <input
+                className="input"
+                placeholder="https://weavers-stock.vercel.app"
+                value={tempBase}
+                onChange={e => setTempBase(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && saveSetup()}
+              />
+            </div>
+            <button className="btn btn-primary" style={{width:"100%"}} onClick={saveSetup}>
+              Save & Launch Dashboard →
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app">
+      <div className="header">
+        <div className="logo">
+          <div className="logo-name">Weavers Villa</div>
+          <div className="logo-sub">Stock Intelligence</div>
+        </div>
+        <div className="header-right">
+          <button className="btn btn-ghost btn-sm" onClick={exportCSV} disabled={!data}>
+            ↓ Export CSV
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={() => { localStorage.removeItem(API_BASE_KEY); setSetupDone(false); setApiBase(""); }}>
+            ⚙ Settings
+          </button>
+          <button className="btn btn-primary" onClick={fetchReport} disabled={loading}>
+            {loading ? "Fetching..." : "↻ Refresh"}
+          </button>
+        </div>
+      </div>
+
+      {error && <div className="error-box">⚠ {error}</div>}
+
+      {loading && (
+        <div className="loading">
+          <div className="spinner"/>
+          <div className="loading-text">Fetching live data from Baselinker...</div>
+        </div>
+      )}
+
+      {!loading && data && (
+        <>
+          {/* Summary */}
+          <div className="summary">
+            <div className="stat-card oos">
+              <div className="stat-num">{data.summary.outOfStock}</div>
+              <div className="stat-label">Out of Stock</div>
+            </div>
+            <div className="stat-card critical">
+              <div className="stat-num">{data.summary.critical}</div>
+              <div className="stat-label">Critical &lt;7d</div>
+            </div>
+            <div className="stat-card low">
+              <div className="stat-num">{data.summary.low}</div>
+              <div className="stat-label">Low &lt;15d</div>
+            </div>
+            <div className="stat-card watch">
+              <div className="stat-num">{data.summary.watch}</div>
+              <div className="stat-label">Watch &lt;30d</div>
+            </div>
+            <div className="stat-card healthy">
+              <div className="stat-num">{data.summary.healthy}</div>
+              <div className="stat-label">Healthy</div>
+            </div>
+            <div className="stat-card dead">
+              <div className="stat-num">{data.summary.deadStock}</div>
+              <div className="stat-label">Dead Stock</div>
+            </div>
+          </div>
+
+          {/* Seasonal multiplier */}
+          <div className="seasonal-bar">
+            <span className="seasonal-label">🌿 Seasonal Multiplier</span>
+            <span className="seasonal-val">{seasonalMult.toFixed(1)}×</span>
+            <input
+              type="range" className="range"
+              min="0.5" max="5" step="0.1"
+              value={seasonalMult}
+              onChange={e => setSeasonalMult(parseFloat(e.target.value))}
+            />
+            <span style={{fontSize:12,color:"var(--text3)"}}>
+              {seasonalMult === 1 ? "Normal season" : seasonalMult > 2 ? "🧣 Peak winter mode" : "Adjusted"}
+            </span>
+          </div>
+
+          {/* Meta */}
+          <div className="meta-bar">
+            <span className="meta-text">Last updated: <span>{lastFetch?.toLocaleTimeString("en-IN")}</span></span>
+            <span className="meta-text">Showing: <span>{filtered.length} / {data.products.length} SKUs</span></span>
+            {seasonalMult !== 1 && <span className="meta-text" style={{color:"var(--accent)"}}>Seasonal {seasonalMult}× applied to order suggestions</span>}
+          </div>
+
+          {/* Controls */}
+          <div className="controls">
+            <div className="search-wrap">
+              <span className="search-icon">⌕</span>
+              <input className="search" placeholder="Search by name or SKU..." value={search} onChange={e => setSearch(e.target.value)}/>
+            </div>
+            {["ALL","OUT_OF_STOCK","CRITICAL","LOW","WATCH","HEALTHY"].map(s => (
+              <button key={s} className={`filter-btn ${!deadFilter && statusFilter===s ? "active":""}`}
+                onClick={() => { setStatusFilter(s); setDeadFilter(false); }}>
+                {s === "ALL" ? "All" : STATUS_LABELS[s] || s}
+              </button>
+            ))}
+            <button className={`filter-btn ${deadFilter ? "active":""}`}
+              onClick={() => { setDeadFilter(!deadFilter); setStatusFilter("ALL"); }}>
+              💀 Dead Stock
+            </button>
+          </div>
+
+          {/* Platform filter */}
+          <div className="controls" style={{marginBottom:16}}>
+            <span style={{fontSize:12,color:"var(--text3)",fontWeight:700,letterSpacing:1,textTransform:"uppercase"}}>Platform:</span>
+            {["ALL","amazon","flipkart","myntra","ajio","others"].map(p => (
+              <button key={p} className={`filter-btn ${platformFilter===p ? "active":""}`}
+                onClick={() => setPlatformFilter(p)}>
+                {p === "ALL" ? "All Platforms" : p.charAt(0).toUpperCase()+p.slice(1)}
+              </button>
+            ))}
+          </div>
+
+          {/* Table */}
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>SKU</th>
+                  <th>Product</th>
+                  <th>Stock</th>
+                  <th>Days Left</th>
+                  <th>Velocity/d</th>
+                  <th>7d Net</th>
+                  <th>15d Net</th>
+                  <th>30d Net</th>
+                  <th>90d Net</th>
+                  <th>Platform 30d</th>
+                  <th>Returns 30d</th>
+                  <th>Order Qty</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.length === 0 && (
+                  <tr><td colSpan={14} className="empty">No products match the current filters</td></tr>
+                )}
+                {filtered.map(p => {
+                  const adjOrder = Math.ceil((p.suggestedOrder || 0) * seasonalMult);
+                  const orderClass = p.status === "OUT_OF_STOCK" || p.status === "CRITICAL" ? "urgent"
+                    : p.status === "LOW" ? "soon"
+                    : p.status === "WATCH" ? "planned"
+                    : "zero";
+
+                  return (
+                    <tr key={p.productId} className={p.isDeadStock ? "dead-stock" : ""}>
+                      <td>
+                        {p.isDeadStock
+                          ? <span className="badge DEAD"><span className="badge-dot"/>&nbsp;Dead Stock</span>
+                          : <span className={`badge ${p.status}`}><span className="badge-dot"/>&nbsp;{STATUS_LABELS[p.status]}</span>
+                        }
+                      </td>
+                      <td><span className="sku">{p.sku}</span></td>
+                      <td className="name-cell">
+                        <div className="product-name">{p.name?.length > 30 ? p.name.slice(0,30)+"…" : p.name}</div>
+                        {p.name?.length > 30 && <div className="tooltip">{p.name}</div>}
+                      </td>
+                      <td>
+                        <span className={p.currentStock === 0 ? "num-danger" : p.currentStock < 10 ? "num-highlight" : "num"}>
+                          {p.currentStock}
+                        </span>
+                      </td>
+                      <td>
+                        {p.daysRemaining === null
+                          ? <span className="num" style={{color:"var(--text3)"}}>—</span>
+                          : <span className={p.daysRemaining <= 7 ? "num-danger" : p.daysRemaining <= 30 ? "num-highlight" : "num-good"}>
+                              {p.daysRemaining}d
+                            </span>
+                        }
+                      </td>
+                      <td><span className="num">{p.dailyVelocity}</span></td>
+                      <td><span className="num">{p.netSales?.d7 ?? 0}</span></td>
+                      <td><span className="num">{p.netSales?.d15 ?? 0}</span></td>
+                      <td><span className="num">{p.netSales?.d30 ?? 0}</span></td>
+                      <td><span className="num">{p.netSales?.d90 ?? 0}</span></td>
+                      <td>
+                        <div className="platform-wrap">
+                          {(p.platformSales?.amazon > 0) && <span className="platform-pill amazon">AM {p.platformSales.amazon}</span>}
+                          {(p.platformSales?.flipkart > 0) && <span className="platform-pill flipkart">FL {p.platformSales.flipkart}</span>}
+                          {(p.platformSales?.myntra > 0) && <span className="platform-pill myntra">MY {p.platformSales.myntra}</span>}
+                          {(p.platformSales?.ajio > 0) && <span className="platform-pill ajio">AJ {p.platformSales.ajio}</span>}
+                          {(p.platformSales?.others > 0) && <span className="platform-pill others">OT {p.platformSales.others}</span>}
+                          {(!p.platformSales?.amazon && !p.platformSales?.flipkart && !p.platformSales?.myntra && !p.platformSales?.ajio && !p.platformSales?.others) && <span style={{color:"var(--text3)",fontSize:12}}>—</span>}
+                        </div>
+                      </td>
+                      <td><span className={p.returns?.d30 > 0 ? "num-danger" : "num"}>{p.returns?.d30 ?? 0}</span></td>
+                      <td>
+                        <span className={`order-qty ${adjOrder > 0 ? orderClass : "zero"}`}>
+                          {adjOrder > 0 ? adjOrder : "—"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {!loading && !data && !error && (
+        <div className="loading">
+          <div className="loading-text" style={{fontSize:16}}>Ready to fetch. Click Refresh to load stock data.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
