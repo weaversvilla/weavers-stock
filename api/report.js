@@ -1,5 +1,4 @@
-// api/report.js — main endpoint
-// Strategy: getOrders for velocity (efficient, ~10-15 API calls total)
+// api/report.js — with in-memory cache to prevent rate limit hammering
 
 const {
   getAllInventoryProducts,
@@ -18,6 +17,10 @@ const {
 
 const INVENTORY_ID = parseInt(process.env.BL_INVENTORY_ID || "1257");
 const WAREHOUSE_ID = parseInt(process.env.BL_WAREHOUSE_ID || "9001890");
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour cache
+
+// In-memory cache (lives for the duration of the Vercel function instance)
+let cache = { data: null, timestamp: 0 };
 
 module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -25,29 +28,39 @@ module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.status(200).end();
 
+  // Force refresh param: /api/report?refresh=1
+  const forceRefresh = req.query?.refresh === "1";
+
+  // Return cached data if fresh
+  const now = Date.now();
+  if (!forceRefresh && cache.data && (now - cache.timestamp) < CACHE_TTL_MS) {
+    console.log("Returning cached report.");
+    return res.status(200).json({
+      ...cache.data,
+      cached: true,
+      cachedAt: new Date(cache.timestamp).toISOString(),
+    });
+  }
+
   try {
     const from90 = daysAgoTimestamp(90);
 
-    // ── 1. Products & Stock (~8 API calls) ──────────────────────────────
     console.log("Fetching products...");
     const productList = await getAllInventoryProducts(INVENTORY_ID);
     const productIds  = Object.keys(productList).map(Number);
     console.log(`${productIds.length} products. Fetching stock...`);
-    const stockData   = await getInventoryStock(INVENTORY_ID, productIds);
+    const stockData = await getInventoryStock(INVENTORY_ID, productIds);
 
-    // ── 2. Orders for last 90 days (~5-10 API calls) ─────────────────────
     console.log("Fetching 90 days of orders...");
     const orders90 = await getOrdersSince(from90);
     console.log(`${orders90.length} orders fetched.`);
 
-    // ── 3. Split orders into time windows ────────────────────────────────
     const ts = {
       d7:  daysAgoTimestamp(7),
       d15: daysAgoTimestamp(15),
       d30: daysAgoTimestamp(30),
     };
 
-    // Use date_confirmed for window filtering
     const ordersIn = {
       d7:  orders90.filter(o => (o.date_confirmed || o.date_add) >= ts.d7),
       d15: orders90.filter(o => (o.date_confirmed || o.date_add) >= ts.d15),
@@ -55,7 +68,6 @@ module.exports = async (req, res) => {
       d90: orders90,
     };
 
-    // Separate regular orders from return orders
     const regularOrders = {
       d7:  ordersIn.d7.filter(o => o.order_source !== "order_return"),
       d15: ordersIn.d15.filter(o => o.order_source !== "order_return"),
@@ -70,7 +82,6 @@ module.exports = async (req, res) => {
       d90: ordersIn.d90.filter(o => o.order_source === "order_return"),
     };
 
-    // ── 4. Aggregate sales & returns per SKU ─────────────────────────────
     const sales = {
       d7:  aggregateOrderSales(regularOrders.d7),
       d15: aggregateOrderSales(regularOrders.d15),
@@ -85,7 +96,6 @@ module.exports = async (req, res) => {
       d90: aggregateOrderReturns(returnOrders.d90),
     };
 
-    // ── 5. Build report per product ──────────────────────────────────────
     const report = [];
 
     for (const [productIdStr, product] of Object.entries(productList)) {
@@ -133,25 +143,30 @@ module.exports = async (req, res) => {
       });
     }
 
-    // Sort: urgent first, dead stock last
     const ORDER = { OUT_OF_STOCK: 0, CRITICAL: 1, LOW: 2, WATCH: 3, HEALTHY: 4 };
     report.sort((a, b) => {
       if (a.isDeadStock !== b.isDeadStock) return a.isDeadStock ? 1 : -1;
       return (ORDER[a.status] ?? 5) - (ORDER[b.status] ?? 5);
     });
 
-    const summary = {
-      total:       report.length,
-      outOfStock:  report.filter(p => p.status === "OUT_OF_STOCK").length,
-      critical:    report.filter(p => p.status === "CRITICAL").length,
-      low:         report.filter(p => p.status === "LOW").length,
-      watch:       report.filter(p => p.status === "WATCH").length,
-      healthy:     report.filter(p => p.status === "HEALTHY").length,
-      deadStock:   report.filter(p => p.isDeadStock).length,
-      generatedAt: new Date().toISOString(),
+    const result = {
+      summary: {
+        total:       report.length,
+        outOfStock:  report.filter(p => p.status === "OUT_OF_STOCK").length,
+        critical:    report.filter(p => p.status === "CRITICAL").length,
+        low:         report.filter(p => p.status === "LOW").length,
+        watch:       report.filter(p => p.status === "WATCH").length,
+        healthy:     report.filter(p => p.status === "HEALTHY").length,
+        deadStock:   report.filter(p => p.isDeadStock).length,
+        generatedAt: new Date().toISOString(),
+      },
+      products: report,
     };
 
-    return res.status(200).json({ summary, products: report });
+    // Store in cache
+    cache = { data: result, timestamp: Date.now() };
+
+    return res.status(200).json(result);
 
   } catch (err) {
     console.error("Report error:", err);
