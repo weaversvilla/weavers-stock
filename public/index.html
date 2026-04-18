@@ -230,7 +230,8 @@ function App() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${apiBase}/api/report`);
+      const res = await fetch(`${apiBase}/report_data.json?t=${Date.now()}`);
+      if (res.status === 404) throw new Error("No report data yet. Please run the Python script first to generate today's report.");
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
