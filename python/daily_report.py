@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 Weavers Villa — Daily Stock Intelligence
-Runs via Windows Task Scheduler at 8am IST
+Runs via Windows Task Scheduler / GitHub Actions at 8am IST
 1. Fetches all data from Baselinker
-2. Calculates velocity + reorder quantities  
-3. Saves report to report_data.json
-4. Uploads to GitHub (Vercel serves it instantly)
-5. Sends HTML email to weavers.villa@gmail.com
+2. Builds bundle map → remaps bundle sales to component SKUs
+3. Calculates velocity + reorder quantities
+4. Saves report to report_data.json
+5. Uploads to GitHub (Vercel serves it instantly)
+6. Sends HTML email to weavers.villa@gmail.com
 """
 
 import json
@@ -24,10 +25,10 @@ from email.mime.text import MIMEText
 from pathlib import Path
 
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
-BL_TOKEN       = "YOUR_STOCK_NOTIFIER_BL_TOKEN"   # ← paste your Stock Notifier BL token
-GITHUB_TOKEN   = "YOUR_GITHUB_PAT"                # ← GitHub Personal Access Token (see setup)
-GITHUB_REPO    = "weaversvilla/weavers-stock"      # ← your repo
-GITHUB_FILE    = "public/report_data.json"         # ← where to store the data
+BL_TOKEN       = "YOUR_STOCK_NOTIFIER_BL_TOKEN"   # ← Stock Notifier BL token
+GITHUB_TOKEN   = "YOUR_GITHUB_PAT"                # ← GitHub Personal Access Token
+GITHUB_REPO    = "weaversvilla/weavers-stock"
+GITHUB_FILE    = "public/report_data.json"
 
 GMAIL_FROM     = "weavers.villa@gmail.com"
 GMAIL_TO       = "weavers.villa@gmail.com"
@@ -38,7 +39,20 @@ WAREHOUSE_ID   = 9001890
 TARGET_DAYS    = 90
 SEASONAL_MULT  = 1.0   # Change to 2.5 before winter season
 
+# Explicitly excluded SKUs (deleted from BL but still appearing in API)
+EXCLUDED_SKUS = {
+    "CHAIR-POPPY-SET-4",
+    "CHAIR-POPPY-SET-6",
+    "CHAIR-PRISM-SET-4",
+    "CHAIR-PRISM-SET-6",
+    "HT-RIBBON-SET-12",
+    "HT-RIBBON-SET-24",
+    "HT-RIBBON-SET-4",
+    "HT-RIBBON-SET-6",
+}
+
 SNAPSHOT_CSV   = Path(__file__).parent / "velocity_history.csv"
+LAST_RUN_FILE  = Path(__file__).parent / "last_run.json"
 
 PLATFORM_MAP = {
     "amazon":   [443, 445, 537],
@@ -131,10 +145,41 @@ def extract_stock(stock_info):
     if not stock_info:
         return 0
     warehouses = stock_info.get("stock", {})
-    for key in [WAREHOUSE_ID, f"bl_{WAREHOUSE_ID}", str(WAREHOUSE_ID)]:
+    for key in [f"bl_{WAREHOUSE_ID}", str(WAREHOUSE_ID), WAREHOUSE_ID]:
         if str(key) in warehouses:
             return int(warehouses[str(key)] or 0)
     return 0
+
+# ── Build bundle map ──────────────────────────────────────────────────────────
+def build_bundle_map(products, stock_data):
+    """
+    Returns {bundle_sku: {component_sku: quantity}}
+    e.g. {'SC+TC-LOTUS-SET-11': {'SC-LOTUS': 10, 'TC-TULIP-RUST': 1}}
+    """
+    # Build product_id → sku lookup
+    id_to_sku = {}
+    for pid_str, product in products.items():
+        sku = product.get("sku") or pid_str
+        id_to_sku[pid_str] = sku
+
+    bundle_map = {}
+    for pid_str, product in products.items():
+        stock_info    = stock_data.get(pid_str, {})
+        bundle_prods  = stock_info.get("bundle_products")
+        if not bundle_prods:
+            continue
+
+        bundle_sku = product.get("sku") or pid_str
+        components = {}
+        for component_id_str, qty in bundle_prods.items():
+            component_sku = id_to_sku.get(str(component_id_str))
+            if component_sku:
+                components[component_sku] = qty
+        if components:
+            bundle_map[bundle_sku] = components
+
+    print(f"  Bundle map built: {len(bundle_map)} bundles with component SKUs.")
+    return bundle_map
 
 # ── Fetch all orders since a date ─────────────────────────────────────────────
 def get_orders_since(date_from):
@@ -166,8 +211,27 @@ def get_orders_since(date_from):
     print(f"  Total {len(all_orders)} orders fetched.")
     return all_orders
 
-# ── Aggregate sales per SKU ───────────────────────────────────────────────────
-def aggregate_sales(orders):
+# ── Load/save last run timestamp for incremental fetching ─────────────────────
+def get_last_run_date():
+    if LAST_RUN_FILE.exists():
+        try:
+            data = json.loads(LAST_RUN_FILE.read_text())
+            return data.get("last_order_date", days_ago(90))
+        except:
+            pass
+    return days_ago(90)
+
+def save_last_run_date(orders):
+    if not orders:
+        return
+    # Save the latest confirmed date from fetched orders
+    last_date = max(
+        (o.get("date_confirmed") or o.get("date_add", 0)) for o in orders
+    )
+    LAST_RUN_FILE.write_text(json.dumps({"last_order_date": last_date}))
+
+# ── Aggregate sales per SKU with bundle remapping ────────────────────────────
+def aggregate_sales(orders, bundle_map={}):
     sales = {}
     for order in orders:
         if order.get("order_source") == "order_return":
@@ -178,10 +242,22 @@ def aggregate_sales(orders):
             if not sku:
                 continue
             qty = int(product.get("quantity", 0))
-            if sku not in sales:
-                sales[sku] = {"total": 0, "amazon": 0, "flipkart": 0, "myntra": 0, "ajio": 0, "others": 0}
-            sales[sku]["total"] += qty
-            sales[sku][platform] = sales[sku].get(platform, 0) + qty
+
+            # If bundle SKU → credit component SKUs instead
+            if sku in bundle_map:
+                for component_sku, component_qty in bundle_map[sku].items():
+                    total_qty = qty * component_qty
+                    if component_sku not in sales:
+                        sales[component_sku] = {"total": 0, "amazon": 0, "flipkart": 0,
+                                                "myntra": 0, "ajio": 0, "others": 0}
+                    sales[component_sku]["total"] += total_qty
+                    sales[component_sku][platform] = sales[component_sku].get(platform, 0) + total_qty
+            else:
+                if sku not in sales:
+                    sales[sku] = {"total": 0, "amazon": 0, "flipkart": 0,
+                                  "myntra": 0, "ajio": 0, "others": 0}
+                sales[sku]["total"] += qty
+                sales[sku][platform] = sales[sku].get(platform, 0) + qty
     return sales
 
 def aggregate_returns(orders):
@@ -205,7 +281,7 @@ def calc_velocity(net_sales):
         "d30": net_sales["d30"] / 30,
         "d90": net_sales["d90"] / 90,
     }
-    has_data = {k: net_sales[k] > 0 for k in ["d7", "d15", "d30", "d90"]}
+    has_data   = {k: net_sales[k] > 0 for k in ["d7", "d15", "d30", "d90"]}
     total_weight = sum(WEIGHTS[k] for k in WEIGHTS if has_data[k])
     if total_weight == 0:
         return 0.0
@@ -214,7 +290,7 @@ def calc_velocity(net_sales):
     return max(0.0, weighted / total_weight)
 
 def calc_metrics(current_stock, net_sales):
-    velocity = calc_velocity(net_sales)
+    velocity      = calc_velocity(net_sales)
     days_remaining = (current_stock / velocity) if velocity > 0 else None
     suggested_order = max(0, round((TARGET_DAYS - (days_remaining or 0)) * velocity)) if velocity > 0 else 0
 
@@ -244,37 +320,84 @@ def build_report():
     product_ids = [int(k) for k in products.keys()]
     stock_data  = get_stock(product_ids)
 
-    from90 = days_ago(90)
-    orders = get_orders_since(from90)
+    print("Building bundle map...")
+    bundle_map  = build_bundle_map(products, stock_data)
+
+    # Incremental order fetching — only fetch new orders since last run
+    # For 90-day velocity we still need full history on first run
+    from90      = days_ago(90)
+    last_run    = get_last_run_date()
+    fetch_from  = min(last_run, from90)  # always go back at least 90 days on first run
+
+    all_orders  = get_orders_since(fetch_from)
+    save_last_run_date(all_orders)
+
+    # Merge with saved history if incremental run
+    history_file = Path(__file__).parent / "orders_cache.json"
+    if fetch_from > from90 and history_file.exists():
+        print("  Loading cached order history...")
+        try:
+            cached = json.loads(history_file.read_text())
+            # Only keep cached orders within 90 day window
+            cutoff = from90
+            cached = [o for o in cached if (o.get("date_confirmed") or o.get("date_add", 0)) >= cutoff]
+            # Merge: add new orders, avoid duplicates
+            existing_ids = {o["order_id"] for o in all_orders}
+            for o in cached:
+                if o["order_id"] not in existing_ids:
+                    all_orders.append(o)
+            print(f"  Merged with cache: {len(all_orders)} total orders in 90-day window.")
+        except Exception as e:
+            print(f"  Cache load failed: {e}. Using fresh orders only.")
+
+    # Save updated cache
+    try:
+        history_file.write_text(json.dumps(all_orders))
+    except:
+        pass
+
+    # Filter to 90-day window
+    orders90 = [o for o in all_orders if (o.get("date_confirmed") or o.get("date_add", 0)) >= from90]
 
     ts = {"d7": days_ago(7), "d15": days_ago(15), "d30": days_ago(30)}
 
     def filter_orders(days_key):
-        return [o for o in orders if (o.get("date_confirmed") or o.get("date_add", 0)) >= ts[days_key]]
+        return [o for o in orders90 if (o.get("date_confirmed") or o.get("date_add", 0)) >= ts[days_key]]
 
     orders_d7  = filter_orders("d7")
     orders_d15 = filter_orders("d15")
     orders_d30 = filter_orders("d30")
 
     sales = {
-        "d7":  aggregate_sales(orders_d7),
-        "d15": aggregate_sales(orders_d15),
-        "d30": aggregate_sales(orders_d30),
-        "d90": aggregate_sales(orders),
+        "d7":  aggregate_sales(orders_d7,  bundle_map),
+        "d15": aggregate_sales(orders_d15, bundle_map),
+        "d30": aggregate_sales(orders_d30, bundle_map),
+        "d90": aggregate_sales(orders90,   bundle_map),
     }
     returns = {
         "d7":  aggregate_returns(orders_d7),
         "d15": aggregate_returns(orders_d15),
         "d30": aggregate_returns(orders_d30),
-        "d90": aggregate_returns(orders),
+        "d90": aggregate_returns(orders90),
     }
 
     report = []
     for product_id_str, product in products.items():
+        stock_info = stock_data.get(product_id_str, {})
+
+        # Skip bundle products
+        if stock_info.get("bundle_products"):
+            continue
+
+        sku = product.get("sku") or product_id_str
+
+        # Skip explicitly excluded SKUs
+        if sku in EXCLUDED_SKUS:
+            continue
+
         product_id    = int(product_id_str)
-        sku           = product.get("sku") or product_id_str
         name          = product.get("name") or "Unknown"
-        current_stock = extract_stock(stock_data.get(product_id))
+        current_stock = extract_stock(stock_data.get(product_id_str))
 
         net_sales = {
             "d7":  max(0, sales["d7"].get(sku, {}).get("total", 0)  - returns["d7"].get(sku, 0)),
@@ -291,10 +414,9 @@ def build_report():
             "others":   sales["d30"].get(sku, {}).get("others", 0),
         }
 
-        metrics   = calc_metrics(current_stock, net_sales)
+        metrics    = calc_metrics(current_stock, net_sales)
         dead_stock = current_stock > 0 and net_sales["d30"] <= 0
-
-        adj_order = round(metrics["suggestedOrder"] * SEASONAL_MULT)
+        adj_order  = round(metrics["suggestedOrder"] * SEASONAL_MULT)
 
         report.append({
             "productId":    product_id,
@@ -347,7 +469,6 @@ def upload_to_github(data):
 
     api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE}"
 
-    # Get current file SHA (needed for update)
     sha = None
     try:
         req = urllib.request.Request(api_url, headers={
@@ -358,7 +479,7 @@ def upload_to_github(data):
             existing = json.loads(resp.read().decode())
             sha = existing.get("sha")
     except:
-        pass  # File doesn't exist yet, first upload
+        pass
 
     payload = {
         "message": f"Daily stock report {datetime.now().strftime('%Y-%m-%d %H:%M')}",
@@ -380,9 +501,9 @@ def upload_to_github(data):
     with urllib.request.urlopen(req) as resp:
         print(f"  Uploaded successfully. Status: {resp.status}")
 
-# ── Save velocity snapshot for seasonality ───────────────────────────────────
+# ── Save velocity snapshot ────────────────────────────────────────────────────
 def save_snapshot(products):
-    today = datetime.now().strftime("%Y-%m-%d")
+    today      = datetime.now().strftime("%Y-%m-%d")
     file_exists = SNAPSHOT_CSV.exists()
     with open(SNAPSHOT_CSV, "a", newline="", encoding="utf-8") as f:
         fieldnames = ["date","sku","name","currentStock","dailyVelocity",
@@ -408,14 +529,14 @@ def save_snapshot(products):
             })
     print(f"  Snapshot saved ({len(products)} rows).")
 
-# ── Build and send HTML email ─────────────────────────────────────────────────
+# ── Send HTML email ───────────────────────────────────────────────────────────
 def send_email(data):
     summary  = data["summary"]
     products = data["products"]
     now      = datetime.now().strftime("%d %b %Y, %I:%M %p IST")
 
-    urgent = [p for p in products if p["status"] in ("OUT_OF_STOCK","CRITICAL") and not p["isDeadStock"]]
-    low    = [p for p in products if p["status"] in ("LOW","WATCH") and not p["isDeadStock"]]
+    urgent = sorted([p for p in products if p["status"] in ("OUT_OF_STOCK","CRITICAL") and not p["isDeadStock"]], key=lambda x: x["suggestedOrder"], reverse=True)
+    low    = sorted([p for p in products if p["status"] in ("LOW","WATCH") and not p["isDeadStock"]], key=lambda x: x["suggestedOrder"], reverse=True)
     dead   = [p for p in products if p["isDeadStock"]]
 
     STATUS_COLOR = {
@@ -428,7 +549,7 @@ def send_email(data):
     }
 
     def platform_cell(p):
-        ps = p.get("platformSales", {})
+        ps    = p.get("platformSales", {})
         parts = []
         if ps.get("amazon",0)>0:   parts.append(f'<span style="color:#ff9900">AM:{ps["amazon"]}</span>')
         if ps.get("flipkart",0)>0: parts.append(f'<span style="color:#2f74ff">FL:{ps["flipkart"]}</span>')
@@ -440,15 +561,15 @@ def send_email(data):
     def product_rows(plist, limit=50):
         rows = ""
         for p in plist[:limit]:
-            color = STATUS_COLOR.get(p["status"], "#999")
-            emoji = STATUS_EMOJI.get(p["status"], "⚪")
-            days  = f'{p["daysRemaining"]}d' if p["daysRemaining"] is not None else "∞"
+            color       = STATUS_COLOR.get(p["status"], "#999")
+            emoji       = STATUS_EMOJI.get(p["status"], "⚪")
+            days        = f'{p["daysRemaining"]}d' if p["daysRemaining"] is not None else "∞"
             order_color = "#e05c5c" if p["status"] in ("OUT_OF_STOCK","CRITICAL") else "#f0a500"
             rows += f"""
             <tr style="border-bottom:1px solid #1e1e2e">
               <td style="padding:10px 14px;color:{color};font-weight:700">{emoji} {p["status"].replace("_"," ")}</td>
               <td style="padding:10px 14px;font-family:monospace;font-size:12px;color:#888">{p["sku"]}</td>
-              <td style="padding:10px 14px;max-width:200px;overflow:hidden;text-overflow:ellipsis">{p["name"][:35]}</td>
+              <td style="padding:10px 14px">{p["name"][:35]}</td>
               <td style="padding:10px 14px;text-align:right;font-family:monospace">{p["currentStock"]}</td>
               <td style="padding:10px 14px;text-align:right;color:{color};font-family:monospace">{days}</td>
               <td style="padding:10px 14px;text-align:right;font-family:monospace">{p["dailyVelocity"]}</td>
@@ -498,7 +619,7 @@ def send_email(data):
   {'<div style="margin-bottom:32px"><div style="font-size:14px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#f0a500;margin-bottom:12px">🟡 Low & Watch — Plan Orders</div>' + make_table(product_rows(low)) + '</div>' if low else ''}
   {'<div style="margin-bottom:32px"><div style="font-size:14px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#5a5a7a;margin-bottom:12px">💀 Dead Stock — Zero Sales 30d</div><table style="width:100%;border-collapse:collapse;font-size:13px;background:#111118;border-radius:10px;overflow:hidden"><thead><tr style="background:#1a1a26;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#5a5a7a"><th style="padding:10px 14px;text-align:left">SKU</th><th style="padding:10px 14px;text-align:left">Product</th><th style="padding:10px 14px;text-align:right">Stock</th></tr></thead><tbody>' + "".join(f'<tr style="border-bottom:1px solid #1e1e2e;opacity:0.6"><td style="padding:10px 14px;font-family:monospace;font-size:12px;color:#5a5a7a">{p["sku"]}</td><td style="padding:10px 14px">{p["name"][:40]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">{p["currentStock"]}</td></tr>' for p in dead[:30]) + '</tbody></table></div>' if dead else ''}
   <div style="font-size:12px;color:#333;margin-top:32px;border-top:1px solid #1a1a2a;padding-top:16px">
-    Generated by Weavers Villa Stock Intelligence · {summary["total"]} SKUs · View dashboard: <a href="https://weavers-stock.vercel.app" style="color:#f0a500">weavers-stock.vercel.app</a>
+    Generated by Weavers Villa Stock Intelligence · {summary["total"]} SKUs · <a href="https://weavers-stock.vercel.app" style="color:#f0a500">weavers-stock.vercel.app</a>
   </div>
 </div></body></html>"""
 
@@ -522,7 +643,7 @@ def main():
     print(f"Weavers Villa Stock Report — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}\n")
 
-    data = build_report()
+    data    = build_report()
     summary = data["summary"]
     print(f"\nSummary: {summary['total']} SKUs | OOS:{summary['outOfStock']} Critical:{summary['critical']} Low:{summary['low']} Dead:{summary['deadStock']}")
 

@@ -109,11 +109,15 @@ body::before{
 table{width:100%;border-collapse:collapse;font-size:13px}
 thead{background:var(--surface2)}
 th{padding:13px 16px;text-align:left;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);white-space:nowrap;border-bottom:1px solid var(--border)}
+th.sortable{cursor:pointer;user-select:none;transition:color 0.15s}
+th.sortable:hover{color:var(--text2)}
+th.sorted{color:var(--accent)}
+.sort-arrow{margin-left:4px;opacity:0.7;font-size:10px}
 td{padding:13px 16px;border-bottom:1px solid var(--border);white-space:nowrap;vertical-align:middle}
 tr:last-child td{border-bottom:none}
 tbody tr{background:var(--surface);transition:background 0.1s}
 tbody tr:hover{background:var(--surface2)}
-tbody tr.dead-stock{opacity:0.55}
+tbody tr.dead-stock{opacity:0.85}
 
 .sku{font-family:var(--mono);font-size:12px;color:var(--text2)}
 .product-name{font-weight:600;max-width:220px;overflow:hidden;text-overflow:ellipsis}
@@ -179,9 +183,41 @@ td.name-cell:hover .tooltip{display:block}
 .tooltip{display:none;position:absolute;background:#222;border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px;white-space:nowrap;z-index:100;top:100%;left:0;color:var(--text)}
 
 @media(max-width:768px){
-  .app{padding:16px}
-  th:nth-child(n+7){display:none}
-  td:nth-child(n+7){display:none}
+  .app{padding:12px}
+  .header{margin-bottom:20px}
+  .logo-name{font-size:22px}
+  .summary{grid-template-columns:repeat(3,1fr);gap:8px}
+  .stat-card{padding:14px 12px}
+  .stat-num{font-size:26px}
+  .controls{gap:6px}
+  .filter-btn{padding:7px 10px;font-size:11px}
+  .seasonal-bar{padding:10px 14px;gap:10px}
+  .range{width:120px}
+
+  /* Mobile table — show only essential columns */
+  /* Show: Status, SKU, Stock, Days Left, Order Qty */
+  /* Hide: Product name, Velocity, 7d, 15d, 30d, 90d, Platform, Returns */
+  th:nth-child(3){display:none} /* Product */
+  td:nth-child(3){display:none}
+  th:nth-child(6){display:none} /* Velocity */
+  td:nth-child(6){display:none}
+  th:nth-child(7){display:none} /* 7d */
+  td:nth-child(7){display:none}
+  th:nth-child(8){display:none} /* 15d */
+  td:nth-child(8){display:none}
+  th:nth-child(9){display:none} /* 30d */
+  td:nth-child(9){display:none}
+  th:nth-child(10){display:none} /* 90d */
+  td:nth-child(10){display:none}
+  th:nth-child(11){display:none} /* Platform */
+  td:nth-child(11){display:none}
+  th:nth-child(12){display:none} /* Returns */
+  td:nth-child(12){display:none}
+
+  /* Make remaining columns fit */
+  th,td{padding:10px 8px;font-size:12px}
+  .badge{font-size:10px;padding:3px 7px}
+  .sku{font-size:11px}
 }
 </style>
 </head>
@@ -191,7 +227,7 @@ td.name-cell:hover .tooltip{display:block}
 const { useState, useEffect, useCallback, useMemo } = React;
 
 const API_BASE_KEY = "wv_api_base";
-const DEFAULT_API_BASE = "https://your-app.vercel.app";
+const HARDCODED_URL = "https://weavers-stock.vercel.app";
 
 const STATUS_LABELS = {
   OUT_OF_STOCK: "Out of Stock",
@@ -202,8 +238,9 @@ const STATUS_LABELS = {
 };
 
 function App() {
-  const [apiBase, setApiBase] = useState(() => localStorage.getItem(API_BASE_KEY) || "");
-  const [setupDone, setSetupDone] = useState(() => !!localStorage.getItem(API_BASE_KEY));
+  // Always use hardcoded URL — no setup screen needed
+  const [apiBase] = useState(HARDCODED_URL);
+  const [setupDone] = useState(true);
   const [tempBase, setTempBase] = useState("");
 
   const [data, setData] = useState(null);
@@ -216,6 +253,13 @@ function App() {
   const [platformFilter, setPlatformFilter] = useState("ALL");
   const [deadFilter, setDeadFilter] = useState(false);
   const [seasonalMult, setSeasonalMult] = useState(1.0);
+  const [sortCol, setSortCol] = useState(null);
+  const [sortDir, setSortDir] = useState("desc");
+
+  const handleSort = (col) => {
+    if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortCol(col); setSortDir("desc"); }
+  };
 
   const saveSetup = () => {
     const base = tempBase.trim().replace(/\/$/, "");
@@ -259,7 +303,7 @@ function App() {
 
   const filtered = useMemo(() => {
     if (!data) return [];
-    return data.products.filter((p) => {
+    let result = data.products.filter((p) => {
       if (deadFilter && !p.isDeadStock) return false;
       if (!deadFilter && statusFilter !== "ALL" && p.status !== statusFilter) return false;
       if (platformFilter !== "ALL") {
@@ -272,7 +316,30 @@ function App() {
       }
       return true;
     });
-  }, [data, statusFilter, platformFilter, deadFilter, search]);
+
+    if (sortCol) {
+      const dir = sortDir === "asc" ? 1 : -1;
+      result = [...result].sort((a, b) => {
+        let av, bv;
+        switch(sortCol) {
+          case "sku":         av = a.sku; bv = b.sku; return dir * av.localeCompare(bv);
+          case "name":        av = a.name; bv = b.name; return dir * av.localeCompare(bv);
+          case "stock":       av = a.currentStock; bv = b.currentStock; break;
+          case "days":        av = a.daysRemaining ?? 9999; bv = b.daysRemaining ?? 9999; break;
+          case "velocity":    av = a.dailyVelocity; bv = b.dailyVelocity; break;
+          case "d7":          av = a.netSales?.d7 ?? 0; bv = b.netSales?.d7 ?? 0; break;
+          case "d15":         av = a.netSales?.d15 ?? 0; bv = b.netSales?.d15 ?? 0; break;
+          case "d30":         av = a.netSales?.d30 ?? 0; bv = b.netSales?.d30 ?? 0; break;
+          case "d90":         av = a.netSales?.d90 ?? 0; bv = b.netSales?.d90 ?? 0; break;
+          case "returns":     av = a.returns?.d30 ?? 0; bv = b.returns?.d30 ?? 0; break;
+          case "order":       av = a.suggestedOrder ?? 0; bv = b.suggestedOrder ?? 0; break;
+          default:            return 0;
+        }
+        return dir * (av - bv);
+      });
+    }
+    return result;
+  }, [data, statusFilter, platformFilter, deadFilter, search, sortCol, sortDir]);
 
   const exportCSV = () => {
     if (!data) return;
@@ -337,9 +404,6 @@ function App() {
         <div className="header-right">
           <button className="btn btn-ghost btn-sm" onClick={exportCSV} disabled={!data}>
             ↓ Export CSV
-          </button>
-          <button className="btn btn-ghost btn-sm" onClick={() => { localStorage.removeItem(API_BASE_KEY); setSetupDone(false); setApiBase(""); }}>
-            ⚙ Settings
           </button>
           <button className="btn btn-primary" onClick={fetchReport} disabled={loading}>
             {loading ? "Fetching..." : "↻ Refresh"}
@@ -442,19 +506,30 @@ function App() {
             <table>
               <thead>
                 <tr>
-                  <th>Status</th>
-                  <th>SKU</th>
-                  <th>Product</th>
-                  <th>Stock</th>
-                  <th>Days Left</th>
-                  <th>Velocity/d</th>
-                  <th>7d Net</th>
-                  <th>15d Net</th>
-                  <th>30d Net</th>
-                  <th>90d Net</th>
-                  <th>Platform 30d</th>
-                  <th>Returns 30d</th>
-                  <th>Order Qty</th>
+                  {[
+                    ["Status",     null],
+                    ["SKU",        "sku"],
+                    ["Product",    "name"],
+                    ["Stock",      "stock"],
+                    ["Days Left",  "days"],
+                    ["Velocity/d", "velocity"],
+                    ["7d Net",     "d7"],
+                    ["15d Net",    "d15"],
+                    ["30d Net",    "d30"],
+                    ["90d Net",    "d90"],
+                    ["Platform 30d", null],
+                    ["Returns 30d", "returns"],
+                    ["Order Qty",  "order"],
+                  ].map(([label, col]) => (
+                    <th key={label}
+                      className={col ? `sortable${sortCol===col ? " sorted":""}` : ""}
+                      onClick={() => col && handleSort(col)}>
+                      {label}
+                      {col && <span className="sort-arrow">
+                        {sortCol===col ? (sortDir==="asc" ? " ↑" : " ↓") : " ↕"}
+                      </span>}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
