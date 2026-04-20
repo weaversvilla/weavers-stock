@@ -199,8 +199,6 @@ td.name-cell:hover .tooltip{display:block}
   /* Hide: Product name, Velocity, 7d, 15d, 30d, 90d, Platform, Returns */
   th:nth-child(3){display:none} /* Product */
   td:nth-child(3){display:none}
-  th:nth-child(6){display:none} /* Velocity */
-  td:nth-child(6){display:none}
   th:nth-child(7){display:none} /* 7d */
   td:nth-child(7){display:none}
   th:nth-child(8){display:none} /* 15d */
@@ -213,6 +211,8 @@ td.name-cell:hover .tooltip{display:block}
   td:nth-child(11){display:none}
   th:nth-child(12){display:none} /* Returns */
   td:nth-child(12){display:none}
+  th:nth-child(13){display:none} /* Velocity */
+  td:nth-child(13){display:none}
 
   /* Make remaining columns fit */
   th,td{padding:10px 8px;font-size:12px}
@@ -512,14 +512,14 @@ function App() {
                     ["Product",    "name"],
                     ["Stock",      "stock"],
                     ["Days Left",  "days"],
-                    ["Velocity/d", "velocity"],
+                    ["Order Qty",  "order"],
                     ["7d Net",     "d7"],
                     ["15d Net",    "d15"],
                     ["30d Net",    "d30"],
                     ["90d Net",    "d90"],
                     ["Platform 30d", null],
                     ["Returns 30d", "returns"],
-                    ["Order Qty",  "order"],
+                    ["Velocity/d", "velocity"],
                   ].map(([label, col]) => (
                     <th key={label}
                       className={col ? `sortable${sortCol===col ? " sorted":""}` : ""}
@@ -569,7 +569,11 @@ function App() {
                             </span>
                         }
                       </td>
-                      <td><span className="num">{p.dailyVelocity}</span></td>
+                      <td>
+                        <span className={`order-qty ${adjOrder > 0 ? orderClass : "zero"}`}>
+                          {adjOrder > 0 ? adjOrder : "—"}
+                        </span>
+                      </td>
                       <td><span className="num">{p.netSales?.d7 ?? 0}</span></td>
                       <td><span className="num">{p.netSales?.d15 ?? 0}</span></td>
                       <td><span className="num">{p.netSales?.d30 ?? 0}</span></td>
@@ -585,11 +589,7 @@ function App() {
                         </div>
                       </td>
                       <td><span className={p.returns?.d30 > 0 ? "num-danger" : "num"}>{p.returns?.d30 ?? 0}</span></td>
-                      <td>
-                        <span className={`order-qty ${adjOrder > 0 ? orderClass : "zero"}`}>
-                          {adjOrder > 0 ? adjOrder : "—"}
-                        </span>
-                      </td>
+                      <td><span className="num">{p.dailyVelocity}</span></td>
                     </tr>
                   );
                 })}
