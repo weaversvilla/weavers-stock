@@ -25,14 +25,14 @@ from email.mime.text import MIMEText
 from pathlib import Path
 
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
-BL_TOKEN       = "YOUR_STOCK_NOTIFIER_BL_TOKEN"   # ← Stock Notifier BL token
-GITHUB_TOKEN   = "YOUR_GITHUB_PAT"                # ← GitHub Personal Access Token
-GITHUB_REPO    = "weaversvilla/weavers-stock"
-GITHUB_FILE    = "public/report_data.json"
+BL_TOKEN       = "9000673-9001055-9YAD5J5NW96PT0AYFMWLNM1I1Q3XW1L4VVJ5GKJ06ORMJA65LAEZN8FMKPZRDLMN"   # ← paste your Stock Notifier BL token
+GITHUB_TOKEN   = "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"                # ← GitHub Personal Access Token (see setup)
+GITHUB_REPO    = "weaversvilla/weavers-stock"      # ← your repo
+GITHUB_FILE    = "public/report_data.json"         # ← where to store the data
 
 GMAIL_FROM     = "weavers.villa@gmail.com"
 GMAIL_TO       = "weavers.villa@gmail.com"
-GMAIL_APP_PASS = "xxxx xxxx xxxx xxxx"             # ← Gmail App Password
+GMAIL_APP_PASS = "jkcd qwlx ehvn iasi"             # ← Gmail App Password
 
 INVENTORY_ID   = 1257
 WAREHOUSE_ID   = 9001890
