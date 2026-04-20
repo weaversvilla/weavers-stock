@@ -71,7 +71,9 @@ body::before{
 
 /* Summary cards */
 .summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:28px}
-.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:20px 22px;position:relative;overflow:hidden}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:20px 22px;position:relative;overflow:hidden;cursor:pointer;transition:border-color 0.15s,transform 0.15s}
+.stat-card:hover{transform:translateY(-2px)}
+.stat-card.active-filter{border-color:var(--accent)!important}
 .stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
 .stat-card.oos::before{background:var(--accent2)}
 .stat-card.critical::before{background:#f07830}
@@ -424,27 +426,33 @@ function App() {
         <>
           {/* Summary */}
           <div className="summary">
-            <div className="stat-card oos">
+            <div className={`stat-card oos ${!deadFilter && statusFilter==="OUT_OF_STOCK" ? "active-filter":""}`}
+              onClick={() => { setStatusFilter("OUT_OF_STOCK"); setDeadFilter(false); }}>
               <div className="stat-num">{data.summary.outOfStock}</div>
               <div className="stat-label">Out of Stock</div>
             </div>
-            <div className="stat-card critical">
+            <div className={`stat-card critical ${!deadFilter && statusFilter==="CRITICAL" ? "active-filter":""}`}
+              onClick={() => { setStatusFilter("CRITICAL"); setDeadFilter(false); }}>
               <div className="stat-num">{data.summary.critical}</div>
               <div className="stat-label">Critical &lt;7d</div>
             </div>
-            <div className="stat-card low">
+            <div className={`stat-card low ${!deadFilter && statusFilter==="LOW" ? "active-filter":""}`}
+              onClick={() => { setStatusFilter("LOW"); setDeadFilter(false); }}>
               <div className="stat-num">{data.summary.low}</div>
               <div className="stat-label">Low &lt;15d</div>
             </div>
-            <div className="stat-card watch">
+            <div className={`stat-card watch ${!deadFilter && statusFilter==="WATCH" ? "active-filter":""}`}
+              onClick={() => { setStatusFilter("WATCH"); setDeadFilter(false); }}>
               <div className="stat-num">{data.summary.watch}</div>
               <div className="stat-label">Watch &lt;30d</div>
             </div>
-            <div className="stat-card healthy">
+            <div className={`stat-card healthy ${!deadFilter && statusFilter==="HEALTHY" ? "active-filter":""}`}
+              onClick={() => { setStatusFilter("HEALTHY"); setDeadFilter(false); }}>
               <div className="stat-num">{data.summary.healthy}</div>
               <div className="stat-label">Healthy</div>
             </div>
-            <div className="stat-card dead">
+            <div className={`stat-card dead ${deadFilter ? "active-filter":""}`}
+              onClick={() => { setDeadFilter(!deadFilter); setStatusFilter("ALL"); }}>
               <div className="stat-num">{data.summary.deadStock}</div>
               <div className="stat-label">Dead Stock</div>
             </div>
