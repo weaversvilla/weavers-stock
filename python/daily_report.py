@@ -25,10 +25,10 @@ from email.mime.text import MIMEText
 from pathlib import Path
 
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
-BL_TOKEN       = "9000673-9001055-9YAD5J5NW96PT0AYFMWLNM1I1Q3XW1L4VVJ5GKJ06ORMJA65LAEZN8FMKPZRDLMN"   # ← paste your Stock Notifier BL token
-GITHUB_TOKEN   = "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"                # ← GitHub Personal Access Token (see setup)
-GITHUB_REPO    = "weaversvilla/weavers-stock"      # ← your repo
-GITHUB_FILE    = "public/report_data.json"         # ← where to store the data
+BL_TOKEN       = "YOUR_STOCK_NOTIFIER_BL_TOKEN"   # ← Stock Notifier BL token
+GITHUB_TOKEN   = "YOUR_GITHUB_PAT"                # ← GitHub Personal Access Token
+GITHUB_REPO    = "weaversvilla/weavers-stock"
+GITHUB_FILE    = "public/report_data.json"
 
 GMAIL_FROM     = "weavers.villa@gmail.com"
 GMAIL_TO       = "weavers.villa@gmail.com"
@@ -179,7 +179,8 @@ def build_bundle_map(products, stock_data):
             bundle_map[bundle_sku] = components
 
     print(f"  Bundle map built: {len(bundle_map)} bundles with component SKUs.")
-    return bundle_map
+    print(f"  Product ID→SKU map: {len(id_to_sku)} entries.")
+    return bundle_map, id_to_sku
 
 # ── Fetch all orders since a date ─────────────────────────────────────────────
 def get_orders_since(date_from):
@@ -231,14 +232,16 @@ def save_last_run_date(orders):
     LAST_RUN_FILE.write_text(json.dumps({"last_order_date": last_date}))
 
 # ── Aggregate sales per SKU with bundle remapping ────────────────────────────
-def aggregate_sales(orders, bundle_map={}):
+def aggregate_sales(orders, bundle_map={}, id_to_sku={}):
     sales = {}
     for order in orders:
         if order.get("order_source") == "order_return":
             continue
         platform = get_platform(order.get("order_source_id", 0))
         for product in order.get("products", []):
-            sku = product.get("sku", "")
+            # Resolve master SKU via product_id first (handles Ajio/platform SKU mismatch)
+            product_id = str(product.get("product_id", ""))
+            sku = id_to_sku.get(product_id) or product.get("sku", "")
             if not sku:
                 continue
             qty = int(product.get("quantity", 0))
@@ -260,13 +263,15 @@ def aggregate_sales(orders, bundle_map={}):
                 sales[sku][platform] = sales[sku].get(platform, 0) + qty
     return sales
 
-def aggregate_returns(orders):
+def aggregate_returns(orders, id_to_sku={}):
     returns = {}
     for order in orders:
         if order.get("order_source") != "order_return":
             continue
         for product in order.get("products", []):
-            sku = product.get("sku", "")
+            # Resolve master SKU via product_id first
+            product_id = str(product.get("product_id", ""))
+            sku = id_to_sku.get(product_id) or product.get("sku", "")
             if not sku:
                 continue
             qty = int(product.get("quantity", 0))
@@ -321,7 +326,7 @@ def build_report():
     stock_data  = get_stock(product_ids)
 
     print("Building bundle map...")
-    bundle_map  = build_bundle_map(products, stock_data)
+    bundle_map, id_to_sku = build_bundle_map(products, stock_data)
 
     # Incremental order fetching — only fetch new orders since last run
     # For 90-day velocity we still need full history on first run
@@ -369,16 +374,16 @@ def build_report():
     orders_d30 = filter_orders("d30")
 
     sales = {
-        "d7":  aggregate_sales(orders_d7,  bundle_map),
-        "d15": aggregate_sales(orders_d15, bundle_map),
-        "d30": aggregate_sales(orders_d30, bundle_map),
-        "d90": aggregate_sales(orders90,   bundle_map),
+        "d7":  aggregate_sales(orders_d7,  bundle_map, id_to_sku),
+        "d15": aggregate_sales(orders_d15, bundle_map, id_to_sku),
+        "d30": aggregate_sales(orders_d30, bundle_map, id_to_sku),
+        "d90": aggregate_sales(orders90,   bundle_map, id_to_sku),
     }
     returns = {
-        "d7":  aggregate_returns(orders_d7),
-        "d15": aggregate_returns(orders_d15),
-        "d30": aggregate_returns(orders_d30),
-        "d90": aggregate_returns(orders90),
+        "d7":  aggregate_returns(orders_d7,  id_to_sku),
+        "d15": aggregate_returns(orders_d15, id_to_sku),
+        "d30": aggregate_returns(orders_d30, id_to_sku),
+        "d90": aggregate_returns(orders90,   id_to_sku),
     }
 
     report = []
