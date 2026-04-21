@@ -148,6 +148,7 @@ tbody tr.dead-stock{opacity:0.85}
 .platform-wrap{display:flex;gap:4px;flex-wrap:wrap}
 .platform-pill{padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;font-family:var(--mono)}
 .platform-pill.amazon{background:rgba(255,153,0,0.15);color:#ff9900}
+.platform-pill.amazon_vendor{background:rgba(255,153,0,0.08);color:#ffb733;border:1px solid rgba(255,153,0,0.3)}
 .platform-pill.flipkart{background:rgba(47,116,255,0.15);color:#2f74ff}
 .platform-pill.myntra{background:rgba(255,63,108,0.15);color:#ff3f6c}
 .platform-pill.ajio{background:rgba(0,200,150,0.15);color:#00c896}
@@ -505,10 +506,10 @@ function App() {
           {/* Platform filter */}
           <div className="controls" style={{marginBottom:16}}>
             <span style={{fontSize:12,color:"var(--text3)",fontWeight:700,letterSpacing:1,textTransform:"uppercase"}}>Platform:</span>
-            {["ALL","amazon","flipkart","myntra","ajio","others"].map(p => (
+            {["ALL","amazon","amazon_vendor","flipkart","myntra","ajio","others"].map(p => (
               <button key={p} className={`filter-btn ${platformFilter===p ? "active":""}`}
                 onClick={() => setPlatformFilter(p)}>
-                {p === "ALL" ? "All Platforms" : p.charAt(0).toUpperCase()+p.slice(1)}
+                {p === "ALL" ? "All Platforms" : p === "amazon_vendor" ? "Amazon Vendor" : p.charAt(0).toUpperCase()+p.slice(1)}
               </button>
             ))}
           </div>
@@ -593,11 +594,12 @@ function App() {
                       <td>
                         <div className="platform-wrap">
                           {(p.platformSales?.amazon > 0) && <span className="platform-pill amazon">AM {p.platformSales.amazon}</span>}
+                          {(p.platformSales?.amazon_vendor > 0) && <span className="platform-pill amazon_vendor">AV {p.platformSales.amazon_vendor}</span>}
                           {(p.platformSales?.flipkart > 0) && <span className="platform-pill flipkart">FL {p.platformSales.flipkart}</span>}
                           {(p.platformSales?.myntra > 0) && <span className="platform-pill myntra">MY {p.platformSales.myntra}</span>}
                           {(p.platformSales?.ajio > 0) && <span className="platform-pill ajio">AJ {p.platformSales.ajio}</span>}
                           {(p.platformSales?.others > 0) && <span className="platform-pill others">OT {p.platformSales.others}</span>}
-                          {(!p.platformSales?.amazon && !p.platformSales?.flipkart && !p.platformSales?.myntra && !p.platformSales?.ajio && !p.platformSales?.others) && <span style={{color:"var(--text3)",fontSize:12}}>—</span>}
+                          {(!p.platformSales?.amazon && !p.platformSales?.amazon_vendor && !p.platformSales?.flipkart && !p.platformSales?.myntra && !p.platformSales?.ajio && !p.platformSales?.others) && <span style={{color:"var(--text3)",fontSize:12}}>—</span>}
                         </div>
                       </td>
                       <td><span className={p.returns?.d30 > 0 ? "num-danger" : "num"}>{p.returns?.d30 ?? 0}</span></td>

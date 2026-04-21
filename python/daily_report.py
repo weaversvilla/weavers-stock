@@ -25,19 +25,24 @@ from email.mime.text import MIMEText
 from pathlib import Path
 
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
-BL_TOKEN       = "9000673-9001055-9YAD5J5NW96PT0AYFMWLNM1I1Q3XW1L4VVJ5GKJ06ORMJA65LAEZN8FMKPZRDLMN"   # ← paste your Stock Notifier BL token
-GITHUB_TOKEN   = "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"                # ← GitHub Personal Access Token (see setup)
-GITHUB_REPO    = "weaversvilla/weavers-stock"      # ← your repo
-GITHUB_FILE    = "public/report_data.json"         # ← where to store the data
+# Tokens — read from environment variables (GitHub Actions Secrets)
+# For local PC run: set hardcoded values here
+BL_TOKEN       = os.environ.get("BL_TOKEN",       "YOUR_STOCK_NOTIFIER_BL_TOKEN")
+GITHUB_TOKEN   = os.environ.get("GITHUB_TOKEN",   "YOUR_GITHUB_PAT")
+GMAIL_APP_PASS = os.environ.get("GMAIL_APP_PASS", "xxxx xxxx xxxx xxxx")
 
+GITHUB_REPO    = "weaversvilla/weavers-stock"
+GITHUB_FILE    = "public/report_data.json"
 GMAIL_FROM     = "weavers.villa@gmail.com"
 GMAIL_TO       = "weavers.villa@gmail.com"
-GMAIL_APP_PASS = "jkcd qwlx ehvn iasi"             # ← Gmail App Password
 
 INVENTORY_ID   = 1257
 WAREHOUSE_ID   = 9001890
 TARGET_DAYS    = 90
 SEASONAL_MULT  = 1.0   # Change to 2.5 before winter season
+
+# Cancelled order status ID
+CANCELLED_STATUS_ID = 12225
 
 # Explicitly excluded SKUs (deleted from BL but still appearing in API)
 EXCLUDED_SKUS = {
@@ -52,14 +57,14 @@ EXCLUDED_SKUS = {
 }
 
 SNAPSHOT_CSV   = Path(__file__).parent / "velocity_history.csv"
-LAST_RUN_FILE  = Path(__file__).parent / "last_run.json"
 
 PLATFORM_MAP = {
-    "amazon":   [443, 445, 537],
-    "flipkart": [1414],
-    "myntra":   [1492],
-    "ajio":     [1548],
-    "others":   [1636, 1601, 9000337],
+    "amazon":         [443],
+    "amazon_vendor":  [445, 537],
+    "flipkart":       [1414],
+    "myntra":         [1492],
+    "ajio":           [1548],
+    "others":         [1636, 1601, 9000337],
 }
 
 WEIGHTS = {"d7": 0.40, "d15": 0.30, "d30": 0.20, "d90": 0.10}
@@ -137,7 +142,7 @@ def get_stock(product_ids):
         })
         all_stock.update(data.get("products", {}))
         if i + BATCH < len(product_ids):
-            time.sleep(0.65)
+            time.sleep(0.15)
     print(f"  Stock fetched for {len(all_stock)} products.")
     return all_stock
 
@@ -188,6 +193,7 @@ def get_orders_since(date_from):
     all_orders = []
     date_confirmed_from = date_from
 
+    # Pass 1: fetch confirmed orders (all regular platforms) via date_confirmed pagination
     while True:
         data = bl_call("getOrders", {
             "date_confirmed_from": date_confirmed_from,
@@ -196,40 +202,75 @@ def get_orders_since(date_from):
         orders = data.get("orders", [])
         if not orders:
             break
-
         all_orders.extend(orders)
-        print(f"  Fetched {len(all_orders)} orders so far...")
-
+        print(f"  Fetched {len(all_orders)} confirmed orders so far...")
         if len(orders) < 100:
             break
-
         last_date = orders[-1].get("date_confirmed", 0)
         if not last_date or last_date <= date_confirmed_from:
             break
         date_confirmed_from = last_date + 1
-        time.sleep(0.65)
+        time.sleep(0.15)
+
+    confirmed_count = len(all_orders)
+    print(f"  Confirmed orders: {confirmed_count}")
+
+    # Pass 2: fetch unconfirmed Vendor DF orders (date_confirmed = 0)
+    # Use date_from + get_unconfirmed_orders=True, filter by amazon_vendor source
+    # These can only be fetched 100 at a time via date_from (no pagination support)
+    # So we fetch all and filter by date_add
+    for source_id in [445, 537]:
+        vendor_data = bl_call("getOrders", {
+            "date_from": date_from,
+            "get_unconfirmed_orders": True,
+            "filter_order_source": "amazon_vendor",
+            "filter_order_source_id": source_id
+        })
+        vendor_orders = vendor_data.get("orders", [])
+        # Filter by date_add since date_confirmed is 0
+        vendor_orders = [
+            o for o in vendor_orders
+            if (o.get("date_add", 0) >= date_from and
+                o.get("order_source_id") == source_id)
+        ]
+        existing_ids = {o["order_id"] for o in all_orders}
+        new_vendor = [o for o in vendor_orders if o["order_id"] not in existing_ids]
+        if new_vendor:
+            all_orders.extend(new_vendor)
+            print(f"  Added {len(new_vendor)} Amazon Vendor DF orders (source {source_id})")
 
     print(f"  Total {len(all_orders)} orders fetched.")
     return all_orders
 
-# ── Load/save last run timestamp for incremental fetching ─────────────────────
-def get_last_run_date():
-    if LAST_RUN_FILE.exists():
-        try:
-            data = json.loads(LAST_RUN_FILE.read_text())
-            return data.get("last_order_date", days_ago(90))
-        except:
-            pass
-    return days_ago(90)
+# ── Fetch all returns since a date ────────────────────────────────────────────
+def get_returns_since(date_from):
+    print(f"Fetching returns since {datetime.fromtimestamp(date_from).strftime('%Y-%m-%d')}...")
+    all_returns = []
+    id_from = 0
 
-def save_last_run_date(orders):
-    if not orders:
-        return
-    # Save the latest confirmed date from fetched orders
-    last_date = max(
-        (o.get("date_confirmed") or o.get("date_add", 0)) for o in orders
-    )
-    LAST_RUN_FILE.write_text(json.dumps({"last_order_date": last_date}))
+    while True:
+        params = {"date_from": date_from}
+        if id_from:
+            params["id_from"] = id_from
+
+        data = bl_call("getOrderReturns", params)
+        returns = data.get("returns", [])
+        if not returns:
+            break
+
+        all_returns.extend(returns)
+
+        if len(returns) < 100:
+            break
+
+        id_from = returns[-1].get("return_id", 0)
+        if not id_from:
+            break
+        time.sleep(0.15)
+
+    # Fetch ALL return statuses — filtering by cancelled order_id done in build_report
+    print(f"  Total {len(all_returns)} returns fetched.")
+    return all_returns
 
 # ── Aggregate sales per SKU with bundle remapping ────────────────────────────
 def aggregate_sales(orders, bundle_map={}, id_to_sku={}):
@@ -237,39 +278,53 @@ def aggregate_sales(orders, bundle_map={}, id_to_sku={}):
     for order in orders:
         if order.get("order_source") == "order_return":
             continue
+        # Skip cancelled orders
+        if order.get("order_status_id") == CANCELLED_STATUS_ID:
+            continue
         platform = get_platform(order.get("order_source_id", 0))
         for product in order.get("products", []):
-            # Resolve master SKU via product_id first (handles Ajio/platform SKU mismatch)
             product_id = str(product.get("product_id", ""))
             sku = id_to_sku.get(product_id) or product.get("sku", "")
             if not sku:
                 continue
             qty = int(product.get("quantity", 0))
 
-            # If bundle SKU → credit component SKUs instead
             if sku in bundle_map:
                 for component_sku, component_qty in bundle_map[sku].items():
                     total_qty = qty * component_qty
                     if component_sku not in sales:
-                        sales[component_sku] = {"total": 0, "amazon": 0, "flipkart": 0,
-                                                "myntra": 0, "ajio": 0, "others": 0}
+                        sales[component_sku] = {"total": 0, "amazon": 0, "amazon_vendor": 0,
+                                                "flipkart": 0, "myntra": 0, "ajio": 0, "others": 0}
                     sales[component_sku]["total"] += total_qty
                     sales[component_sku][platform] = sales[component_sku].get(platform, 0) + total_qty
             else:
                 if sku not in sales:
-                    sales[sku] = {"total": 0, "amazon": 0, "flipkart": 0,
-                                  "myntra": 0, "ajio": 0, "others": 0}
+                    sales[sku] = {"total": 0, "amazon": 0, "amazon_vendor": 0,
+                                  "flipkart": 0, "myntra": 0, "ajio": 0, "others": 0}
                 sales[sku]["total"] += qty
                 sales[sku][platform] = sales[sku].get(platform, 0) + qty
     return sales
 
 def aggregate_returns(orders, id_to_sku={}):
+    """Returns from orders panel (order_source = order_return)"""
     returns = {}
     for order in orders:
         if order.get("order_source") != "order_return":
             continue
         for product in order.get("products", []):
-            # Resolve master SKU via product_id first
+            product_id = str(product.get("product_id", ""))
+            sku = id_to_sku.get(product_id) or product.get("sku", "")
+            if not sku:
+                continue
+            qty = int(product.get("quantity", 0))
+            returns[sku] = returns.get(sku, 0) + qty
+    return returns
+
+def aggregate_returns_panel(panel_returns, id_to_sku={}):
+    """Returns from Returns panel via getOrderReturns — completed returns only"""
+    returns = {}
+    for ret in panel_returns:
+        for product in ret.get("products", []):
             product_id = str(product.get("product_id", ""))
             sku = id_to_sku.get(product_id) or product.get("sku", "")
             if not sku:
@@ -328,50 +383,42 @@ def build_report():
     print("Building bundle map...")
     bundle_map, id_to_sku = build_bundle_map(products, stock_data)
 
-    # Incremental order fetching — only fetch new orders since last run
-    # For 90-day velocity we still need full history on first run
-    from90      = days_ago(90)
-    last_run    = get_last_run_date()
-    fetch_from  = min(last_run, from90)  # always go back at least 90 days on first run
+    # Always fetch full 90 days fresh — ensures accurate cancelled/RTO status
+    from90     = days_ago(90)
+    all_orders = get_orders_since(from90)
 
-    all_orders  = get_orders_since(fetch_from)
-    save_last_run_date(all_orders)
+    # Build cancelled order ID set for return filtering
+    cancelled_order_ids = {
+        o["order_id"] for o in all_orders
+        if o.get("order_status_id") == CANCELLED_STATUS_ID
+    }
+    print(f"  Cancelled orders in 90d: {len(cancelled_order_ids)}")
 
-    # Merge with saved history if incremental run
-    history_file = Path(__file__).parent / "orders_cache.json"
-    if fetch_from > from90 and history_file.exists():
-        print("  Loading cached order history...")
-        try:
-            cached = json.loads(history_file.read_text())
-            # Only keep cached orders within 90 day window
-            cutoff = from90
-            cached = [o for o in cached if (o.get("date_confirmed") or o.get("date_add", 0)) >= cutoff]
-            # Merge: add new orders, avoid duplicates
-            existing_ids = {o["order_id"] for o in all_orders}
-            for o in cached:
-                if o["order_id"] not in existing_ids:
-                    all_orders.append(o)
-            print(f"  Merged with cache: {len(all_orders)} total orders in 90-day window.")
-        except Exception as e:
-            print(f"  Cache load failed: {e}. Using fresh orders only.")
-
-    # Save updated cache
-    try:
-        history_file.write_text(json.dumps(all_orders))
-    except:
-        pass
-
-    # Filter to 90-day window
+    # Filter to 90-day window (already is, but ensure clean)
     orders90 = [o for o in all_orders if (o.get("date_confirmed") or o.get("date_add", 0)) >= from90]
+
+    # Fetch returns from Returns panel — exclude RTO (cancelled order returns)
+    print("Fetching returns from Returns panel...")
+    all_panel_returns = get_returns_since(from90)
+    # Only count returns where original order was NOT cancelled (excludes RTO)
+    panel_returns = [r for r in all_panel_returns if r.get("order_id") not in cancelled_order_ids]
+    print(f"  Valid returns (non-RTO): {len(panel_returns)} of {len(all_panel_returns)}")
 
     ts = {"d7": days_ago(7), "d15": days_ago(15), "d30": days_ago(30)}
 
     def filter_orders(days_key):
         return [o for o in orders90 if (o.get("date_confirmed") or o.get("date_add", 0)) >= ts[days_key]]
 
+    def filter_returns(days_key):
+        return [r for r in panel_returns if r.get("date_add", 0) >= ts[days_key]]
+
     orders_d7  = filter_orders("d7")
     orders_d15 = filter_orders("d15")
     orders_d30 = filter_orders("d30")
+
+    panel_returns_d7  = filter_returns("d7")
+    panel_returns_d15 = filter_returns("d15")
+    panel_returns_d30 = filter_returns("d30")
 
     sales = {
         "d7":  aggregate_sales(orders_d7,  bundle_map, id_to_sku),
@@ -379,11 +426,21 @@ def build_report():
         "d30": aggregate_sales(orders_d30, bundle_map, id_to_sku),
         "d90": aggregate_sales(orders90,   bundle_map, id_to_sku),
     }
+
+    # Merge returns from orders panel + returns panel
+    def merge_returns(orders_ret, panel_ret):
+        r1 = aggregate_returns(orders_ret, id_to_sku)
+        r2 = aggregate_returns_panel(panel_ret, id_to_sku)
+        merged = dict(r1)
+        for sku, qty in r2.items():
+            merged[sku] = merged.get(sku, 0) + qty
+        return merged
+
     returns = {
-        "d7":  aggregate_returns(orders_d7,  id_to_sku),
-        "d15": aggregate_returns(orders_d15, id_to_sku),
-        "d30": aggregate_returns(orders_d30, id_to_sku),
-        "d90": aggregate_returns(orders90,   id_to_sku),
+        "d7":  merge_returns(orders_d7,  panel_returns_d7),
+        "d15": merge_returns(orders_d15, panel_returns_d15),
+        "d30": merge_returns(orders_d30, panel_returns_d30),
+        "d90": merge_returns(orders90,   panel_returns),
     }
 
     report = []
@@ -412,11 +469,12 @@ def build_report():
         }
 
         platform_sales = {
-            "amazon":   sales["d30"].get(sku, {}).get("amazon", 0),
-            "flipkart": sales["d30"].get(sku, {}).get("flipkart", 0),
-            "myntra":   sales["d30"].get(sku, {}).get("myntra", 0),
-            "ajio":     sales["d30"].get(sku, {}).get("ajio", 0),
-            "others":   sales["d30"].get(sku, {}).get("others", 0),
+            "amazon":        sales["d30"].get(sku, {}).get("amazon", 0),
+            "amazon_vendor": sales["d30"].get(sku, {}).get("amazon_vendor", 0),
+            "flipkart":      sales["d30"].get(sku, {}).get("flipkart", 0),
+            "myntra":        sales["d30"].get(sku, {}).get("myntra", 0),
+            "ajio":          sales["d30"].get(sku, {}).get("ajio", 0),
+            "others":        sales["d30"].get(sku, {}).get("others", 0),
         }
 
         metrics    = calc_metrics(current_stock, net_sales)

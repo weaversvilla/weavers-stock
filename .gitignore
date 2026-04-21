@@ -1,0 +1,13 @@
+# Python cache files
+python/orders_cache.json
+python/last_run.json
+python/__pycache__/
+*.pyc
+
+# Local env files
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db

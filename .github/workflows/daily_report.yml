@@ -1,0 +1,36 @@
+name: Daily Stock Report
+
+on:
+  schedule:
+    # 8:00 AM IST = 2:30 AM UTC
+    - cron: '30 2 * * *'
+  workflow_dispatch:  # Allow manual trigger from GitHub UI
+
+jobs:
+  run-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run stock report
+        env:
+          BL_TOKEN: ${{ secrets.BL_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GMAIL_APP_PASS: ${{ secrets.GMAIL_APP_PASS }}
+        run: python python/daily_report.py
+
+      - name: Commit velocity snapshot
+        run: |
+          git config --global user.name "Stock Bot"
+          git config --global user.email "weavers.villa@gmail.com"
+          git add python/velocity_history.csv || true
+          git diff --staged --quiet || git commit -m "Daily velocity snapshot $(date +%Y-%m-%d)"
+          git push || true
