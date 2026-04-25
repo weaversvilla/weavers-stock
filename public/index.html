@@ -474,8 +474,14 @@ function App() {
               ₹{(data.summary.totalStockValue||0).toLocaleString("en-IN")}
             </span>
             <span style={{fontSize:12,color:"var(--text3)",marginLeft:8}}>
-              Dead Stock: <span style={{color:"var(--accent2)"}}>₹{(data.summary.deadStockValue||0).toLocaleString("en-IN")}</span>
-              <span style={{color:"var(--text3)",marginLeft:6}}>
+              Healthy: <span style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"var(--accent3)"}}>₹{(data.summary.healthyStockValue||0).toLocaleString("en-IN")}</span>
+              <span style={{color:"var(--text3)",marginLeft:6,fontSize:12}}>
+                ({data.summary.totalStockValue ? Math.round(100*data.summary.healthyStockValue/data.summary.totalStockValue) : 0}%)
+              </span>
+            </span>
+            <span style={{fontSize:12,color:"var(--text3)",marginLeft:8}}>
+              Dead Stock: <span style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"var(--accent2)"}}>₹{(data.summary.deadStockValue||0).toLocaleString("en-IN")}</span>
+              <span style={{color:"var(--text3)",marginLeft:6,fontSize:12}}>
                 ({data.summary.totalStockValue ? Math.round(100*data.summary.deadStockValue/data.summary.totalStockValue) : 0}% locked)
               </span>
             </span>

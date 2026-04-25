@@ -565,8 +565,9 @@ def build_report():
         "watch":            sum(1 for p in report if p["status"] == "WATCH"),
         "healthy":          sum(1 for p in report if p["status"] == "HEALTHY"),
         "deadStock":        sum(1 for p in report if p["isDeadStock"]),
-        "totalStockValue":  sum(p["stockValue"] for p in report),
-        "deadStockValue":   sum(p["stockValue"] for p in report if p["isDeadStock"]),
+        "totalStockValue":   sum(p["stockValue"] for p in report),
+        "deadStockValue":    sum(p["stockValue"] for p in report if p["isDeadStock"]),
+        "healthyStockValue": sum(p["stockValue"] for p in report if p["status"] == "HEALTHY" and not p["isDeadStock"]),
         "generatedAt":      datetime.now(timezone.utc).isoformat(),
         "seasonalMult":     SEASONAL_MULT,
     }
