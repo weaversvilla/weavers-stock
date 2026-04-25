@@ -23,7 +23,7 @@ jobs:
       - name: Run stock report
         env:
           BL_TOKEN: ${{ secrets.BL_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GH_PAT: ${{ secrets.GH_PAT }}
           GMAIL_APP_PASS: ${{ secrets.GMAIL_APP_PASS }}
         run: python python/daily_report.py
 

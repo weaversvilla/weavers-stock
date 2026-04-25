@@ -28,8 +28,8 @@ from pathlib import Path
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
 # Tokens — read from environment variables (GitHub Actions Secrets)
 # For local PC run: set hardcoded values here
-BL_TOKEN       = "9000673-9001055-9YAD5J5NW96PT0AYFMWLNM1I1Q3XW1L4VVJ5GKJ06ORMJA65LAEZN8FMKPZRDLMN"   # ← paste your Stock Notifier BL token
-GITHUB_TOKEN   = "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"                # ← GitHub Personal Access Token (see setup)
+BL_TOKEN       = os.environ.get("BL_TOKEN",       "9000673-9001055-9YAD5J5NW96PT0AYFMWLNM1I1Q3XW1L4VVJ5GKJ06ORMJA65LAEZN8FMKPZRDLMN")
+GITHUB_TOKEN   = os.environ.get("GH_PAT",         os.environ.get("GITHUB_TOKEN", "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"))
 GMAIL_APP_PASS = os.environ.get("GMAIL_APP_PASS", "jkcd qwlx ehvn iasi")
 
 GITHUB_REPO    = "weaversvilla/weavers-stock"
