@@ -14,6 +14,7 @@ import json
 import csv
 import os
 import time
+import socket
 import smtplib
 import urllib.request
 import urllib.error
@@ -27,8 +28,8 @@ from pathlib import Path
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
 # Tokens — read from environment variables (GitHub Actions Secrets)
 # For local PC run: set hardcoded values here
-BL_TOKEN       = os.environ.get("BL_TOKEN",       "YOUR_STOCK_NOTIFIER_BL_TOKEN")
-GITHUB_TOKEN   = os.environ.get("GITHUB_TOKEN",   "YOUR_GITHUB_PAT")
+BL_TOKEN       = "9000673-9001055-9YAD5J5NW96PT0AYFMWLNM1I1Q3XW1L4VVJ5GKJ06ORMJA65LAEZN8FMKPZRDLMN"   # ← paste your Stock Notifier BL token
+GITHUB_TOKEN   = "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"                # ← GitHub Personal Access Token (see setup)
 GMAIL_APP_PASS = os.environ.get("GMAIL_APP_PASS", "xxxx xxxx xxxx xxxx")
 
 GITHUB_REPO    = "weaversvilla/weavers-stock"
@@ -71,19 +72,20 @@ WEIGHTS = {"d7": 0.40, "d15": 0.30, "d30": 0.20, "d90": 0.10}
 # ─────────────────────────────────────────────────────────────────────────────
 
 BL_URL = "https://api.baselinker.com/connector.php"
+socket.setdefaulttimeout(60)  # Global 60s timeout for all network calls
 
 def bl_call(method, params={}):
-    """Make a Baselinker API call with rate limit handling."""
+    """Make a Baselinker API call with rate limit and timeout handling."""
     data = urllib.parse.urlencode({
         "token": BL_TOKEN,
         "method": method,
         "parameters": json.dumps(params)
     }).encode()
 
-    for attempt in range(3):
+    for attempt in range(5):
         try:
             req = urllib.request.Request(BL_URL, data=data, method="POST")
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 result = json.loads(resp.read().decode())
 
             if result.get("status") == "SUCCESS":
@@ -97,11 +99,15 @@ def bl_call(method, params={}):
 
             raise Exception(f"BL API error [{method}]: {err}")
 
+        except TimeoutError as e:
+            print(f"  Timeout on attempt {attempt+1}, retrying in 5s...")
+            time.sleep(5)
+            continue
         except urllib.error.URLError as e:
             print(f"  Network error attempt {attempt+1}: {e}")
             time.sleep(5)
 
-    raise Exception(f"BL API [{method}] failed after 3 attempts")
+    raise Exception(f"BL API [{method}] failed after 5 attempts")
 
 def days_ago(days):
     return int(time.time()) - days * 86400
@@ -216,28 +222,48 @@ def get_orders_since(date_from):
     print(f"  Confirmed orders: {confirmed_count}")
 
     # Pass 2: fetch unconfirmed Vendor DF orders (date_confirmed = 0)
-    # Use date_from + get_unconfirmed_orders=True, filter by amazon_vendor source
-    # These can only be fetched 100 at a time via date_from (no pagination support)
-    # So we fetch all and filter by date_add
+    # Must paginate using id_from since date_confirmed_from doesn't work for these
+    existing_ids = {o["order_id"] for o in all_orders}
+
     for source_id in [445, 537]:
-        vendor_data = bl_call("getOrders", {
-            "date_from": date_from,
-            "get_unconfirmed_orders": True,
-            "filter_order_source": "amazon_vendor",
-            "filter_order_source_id": source_id
-        })
-        vendor_orders = vendor_data.get("orders", [])
-        # Filter by date_add since date_confirmed is 0
-        vendor_orders = [
-            o for o in vendor_orders
-            if (o.get("date_add", 0) >= date_from and
-                o.get("order_source_id") == source_id)
-        ]
-        existing_ids = {o["order_id"] for o in all_orders}
-        new_vendor = [o for o in vendor_orders if o["order_id"] not in existing_ids]
-        if new_vendor:
-            all_orders.extend(new_vendor)
-            print(f"  Added {len(new_vendor)} Amazon Vendor DF orders (source {source_id})")
+        vendor_count = 0
+        id_from = 0
+
+        while True:
+            params = {
+                "date_from": date_from,
+                "get_unconfirmed_orders": True,
+                "filter_order_source": "amazon_vendor",
+                "filter_order_source_id": source_id,
+            }
+            if id_from:
+                params["id_from"] = id_from
+
+            data = bl_call("getOrders", params)
+            vendor_orders = data.get("orders", [])
+            if not vendor_orders:
+                break
+
+            # Filter by date_add and exclude already fetched
+            new_orders = [
+                o for o in vendor_orders
+                if o.get("date_add", 0) >= date_from
+                and o["order_id"] not in existing_ids
+            ]
+            all_orders.extend(new_orders)
+            existing_ids.update(o["order_id"] for o in new_orders)
+            vendor_count += len(new_orders)
+
+            if len(vendor_orders) < 100:
+                break
+
+            id_from = vendor_orders[-1].get("order_id", 0)
+            if not id_from:
+                break
+            time.sleep(0.15)
+
+        if vendor_count:
+            print(f"  Added {vendor_count} Amazon Vendor DF orders (source {source_id})")
 
     print(f"  Total {len(all_orders)} orders fetched.")
     return all_orders
@@ -246,29 +272,38 @@ def get_orders_since(date_from):
 def get_returns_since(date_from):
     print(f"Fetching returns since {datetime.fromtimestamp(date_from).strftime('%Y-%m-%d')}...")
     all_returns = []
-    id_from = 0
+    last_return_id = 0
+    max_pages = 500  # safety cap — 500 × 100 = 50,000 returns max
 
-    while True:
-        params = {"date_from": date_from}
-        if id_from:
-            params["id_from"] = id_from
+    for page in range(max_pages):
+        try:
+            params = {"date_from": date_from}
+            if last_return_id:
+                params["id_from"] = last_return_id + 1  # BL pagination requires +1
 
-        data = bl_call("getOrderReturns", params)
-        returns = data.get("returns", [])
-        if not returns:
+            data = bl_call("getOrderReturns", params)
+            returns = data.get("returns", [])
+            if not returns:
+                break
+
+            all_returns.extend(returns)
+
+            if len(all_returns) % 1000 == 0:
+                print(f"  Fetched {len(all_returns)} returns so far...")
+
+            if len(returns) < 100:
+                break
+
+            new_last_id = returns[-1].get("return_id", 0)
+            if not new_last_id:
+                break
+            last_return_id = new_last_id
+            time.sleep(0.15)
+
+        except Exception as e:
+            print(f"  Returns fetch error on page {page+1}: {e}")
             break
 
-        all_returns.extend(returns)
-
-        if len(returns) < 100:
-            break
-
-        id_from = returns[-1].get("return_id", 0)
-        if not id_from:
-            break
-        time.sleep(0.15)
-
-    # Fetch ALL return statuses — filtering by cancelled order_id done in build_report
     print(f"  Total {len(all_returns)} returns fetched.")
     return all_returns
 
@@ -400,9 +435,12 @@ def build_report():
     # Fetch returns from Returns panel — exclude RTO (cancelled order returns)
     print("Fetching returns from Returns panel...")
     all_panel_returns = get_returns_since(from90)
-    # Only count returns where original order was NOT cancelled (excludes RTO)
-    panel_returns = [r for r in all_panel_returns if r.get("order_id") not in cancelled_order_ids]
-    print(f"  Valid returns (non-RTO): {len(panel_returns)} of {len(all_panel_returns)}")
+    # Fetch ALL return statuses — exclude only Rejected (5829)
+    # Rejected = return refused by seller, stock never came back
+    REJECTED_STATUS_ID = 5829
+    valid_returns = [r for r in all_panel_returns if r.get("status_id") != REJECTED_STATUS_ID]
+    panel_returns = [r for r in valid_returns if r.get("order_id") not in cancelled_order_ids]
+    print(f"  Valid returns (excl. rejected + RTO): {len(panel_returns)} of {len(all_panel_returns)}")
 
     ts = {"d7": days_ago(7), "d15": days_ago(15), "d30": days_ago(30)}
 

@@ -235,6 +235,7 @@ const { useState, useEffect, useCallback, useMemo } = React;
 
 const API_BASE_KEY = "wv_api_base";
 const HARDCODED_URL = "https://weavers-stock.vercel.app";
+const DATA_URL = "https://raw.githubusercontent.com/weaversvilla/weavers-stock/main/public/report_data.json";
 
 const STATUS_LABELS = {
   OUT_OF_STOCK: "Out of Stock",
@@ -277,11 +278,11 @@ function App() {
   };
 
   const fetchReport = useCallback(async () => {
-    if (!apiBase) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${apiBase}/report_data.json?t=${Date.now()}`);
+      // Fetch directly from GitHub raw URL — always fresh, bypasses Vercel CDN cache
+      const res = await fetch(`${DATA_URL}?t=${Date.now()}`);
       if (res.status === 404) throw new Error("No report data yet. Please run the Python script first to generate today's report.");
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
       const json = await res.json();
