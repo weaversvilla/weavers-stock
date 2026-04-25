@@ -28,9 +28,9 @@ from pathlib import Path
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
 # Tokens — read from environment variables (GitHub Actions Secrets)
 # For local PC run: set hardcoded values here
-BL_TOKEN       = os.environ.get("BL_TOKEN",       "YOUR_STOCK_NOTIFIER_BL_TOKEN")
-GITHUB_TOKEN   = os.environ.get("GH_PAT",         os.environ.get("GITHUB_TOKEN", "YOUR_GITHUB_PAT"))
-GMAIL_APP_PASS = os.environ.get("GMAIL_APP_PASS", "xxxx xxxx xxxx xxxx")
+BL_TOKEN       = os.environ.get("BL_TOKEN",       "9000673-9001055-9YAD5J5NW96PT0AYFMWLNM1I1Q3XW1L4VVJ5GKJ06ORMJA65LAEZN8FMKPZRDLMN")
+GITHUB_TOKEN   = os.environ.get("GH_PAT",         os.environ.get("GITHUB_TOKEN", "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"))
+GMAIL_APP_PASS = os.environ.get("GMAIL_APP_PASS", "jkcd qwlx ehvn iasi")
 
 GITHUB_REPO    = "weaversvilla/weavers-stock"
 GITHUB_FILE    = "public/report_data.json"
@@ -160,6 +160,11 @@ def extract_stock(stock_info):
         if str(key) in warehouses:
             return int(warehouses[str(key)] or 0)
     return 0
+
+def extract_cost(stock_info):
+    if not stock_info:
+        return 0
+    return float(stock_info.get("average_cost") or 0)
 
 # ── Build bundle map ──────────────────────────────────────────────────────────
 def build_bundle_map(products, stock_data):
@@ -498,6 +503,8 @@ def build_report():
         product_id    = int(product_id_str)
         name          = product.get("name") or "Unknown"
         current_stock = extract_stock(stock_data.get(product_id_str))
+        avg_cost      = extract_cost(stock_data.get(product_id_str))
+        stock_value   = round(current_stock * avg_cost)
 
         net_sales = {
             "d7":  max(0, sales["d7"].get(sku, {}).get("total", 0)  - returns["d7"].get(sku, 0)),
@@ -543,21 +550,25 @@ def build_report():
             "suggestedOrder": adj_order,
             "status":         metrics["status"],
             "isDeadStock":    dead_stock,
+            "avgCost":        avg_cost,
+            "stockValue":     stock_value,
         })
 
     status_order = {"OUT_OF_STOCK": 0, "CRITICAL": 1, "LOW": 2, "WATCH": 3, "HEALTHY": 4}
     report.sort(key=lambda p: (p["isDeadStock"], status_order.get(p["status"], 5)))
 
     summary = {
-        "total":       len(report),
-        "outOfStock":  sum(1 for p in report if p["status"] == "OUT_OF_STOCK"),
-        "critical":    sum(1 for p in report if p["status"] == "CRITICAL"),
-        "low":         sum(1 for p in report if p["status"] == "LOW"),
-        "watch":       sum(1 for p in report if p["status"] == "WATCH"),
-        "healthy":     sum(1 for p in report if p["status"] == "HEALTHY"),
-        "deadStock":   sum(1 for p in report if p["isDeadStock"]),
-        "generatedAt": datetime.now(timezone.utc).isoformat(),
-        "seasonalMult": SEASONAL_MULT,
+        "total":            len(report),
+        "outOfStock":       sum(1 for p in report if p["status"] == "OUT_OF_STOCK"),
+        "critical":         sum(1 for p in report if p["status"] == "CRITICAL"),
+        "low":              sum(1 for p in report if p["status"] == "LOW"),
+        "watch":            sum(1 for p in report if p["status"] == "WATCH"),
+        "healthy":          sum(1 for p in report if p["status"] == "HEALTHY"),
+        "deadStock":        sum(1 for p in report if p["isDeadStock"]),
+        "totalStockValue":  sum(p["stockValue"] for p in report),
+        "deadStockValue":   sum(p["stockValue"] for p in report if p["isDeadStock"]),
+        "generatedAt":      datetime.now(timezone.utc).isoformat(),
+        "seasonalMult":     SEASONAL_MULT,
     }
 
     return {"summary": summary, "products": report}

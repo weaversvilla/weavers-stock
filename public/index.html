@@ -206,20 +206,22 @@ td.name-cell:hover .tooltip{display:block}
   /* Hide: Product name, Velocity, 7d, 15d, 30d, 90d, Platform, Returns */
   th:nth-child(3){display:none} /* Product */
   td:nth-child(3){display:none}
-  th:nth-child(7){display:none} /* 7d */
+  th:nth-child(7){display:none} /* Stock Value */
   td:nth-child(7){display:none}
-  th:nth-child(8){display:none} /* 15d */
+  th:nth-child(8){display:none} /* 7d */
   td:nth-child(8){display:none}
-  th:nth-child(9){display:none} /* 30d */
+  th:nth-child(9){display:none} /* 15d */
   td:nth-child(9){display:none}
-  th:nth-child(10){display:none} /* 90d */
+  th:nth-child(10){display:none} /* 30d */
   td:nth-child(10){display:none}
-  th:nth-child(11){display:none} /* Platform */
+  th:nth-child(11){display:none} /* 90d */
   td:nth-child(11){display:none}
-  th:nth-child(12){display:none} /* Returns */
+  th:nth-child(12){display:none} /* Platform */
   td:nth-child(12){display:none}
-  th:nth-child(13){display:none} /* Velocity */
+  th:nth-child(13){display:none} /* Returns */
   td:nth-child(13){display:none}
+  th:nth-child(14){display:none} /* Velocity */
+  td:nth-child(14){display:none}
 
   /* Make remaining columns fit */
   th,td{padding:10px 8px;font-size:12px}
@@ -341,6 +343,7 @@ function App() {
           case "d90":         av = a.netSales?.d90 ?? 0; bv = b.netSales?.d90 ?? 0; break;
           case "returns":     av = a.returns?.d30 ?? 0; bv = b.returns?.d30 ?? 0; break;
           case "order":       av = a.suggestedOrder ?? 0; bv = b.suggestedOrder ?? 0; break;
+          case "stockValue":  av = a.stockValue ?? 0; bv = b.stockValue ?? 0; break;
           default:            return 0;
         }
         return dir * (av - bv);
@@ -464,6 +467,20 @@ function App() {
             </div>
           </div>
 
+          {/* Inventory Value Bar */}
+          <div className="seasonal-bar" style={{marginBottom:20}}>
+            <span className="seasonal-label">📦 Total Inventory Value</span>
+            <span style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"var(--accent)"}}>
+              ₹{(data.summary.totalStockValue||0).toLocaleString("en-IN")}
+            </span>
+            <span style={{fontSize:12,color:"var(--text3)",marginLeft:8}}>
+              Dead Stock: <span style={{color:"var(--accent2)"}}>₹{(data.summary.deadStockValue||0).toLocaleString("en-IN")}</span>
+              <span style={{color:"var(--text3)",marginLeft:6}}>
+                ({data.summary.totalStockValue ? Math.round(100*data.summary.deadStockValue/data.summary.totalStockValue) : 0}% locked)
+              </span>
+            </span>
+          </div>
+
           {/* Seasonal multiplier */}
           <div className="seasonal-bar">
             <span className="seasonal-label">🌿 Seasonal Multiplier</span>
@@ -527,6 +544,7 @@ function App() {
                     ["Stock",      "stock"],
                     ["Days Left",  "days"],
                     ["Order Qty",  "order"],
+                    ["Stock Value","stockValue"],
                     ["7d Net",     "d7"],
                     ["15d Net",    "d15"],
                     ["30d Net",    "d30"],
@@ -587,6 +605,16 @@ function App() {
                         <span className={`order-qty ${adjOrder > 0 ? orderClass : "zero"}`}>
                           {adjOrder > 0 ? adjOrder : "—"}
                         </span>
+                      </td>
+                      <td>
+                        {p.stockValue > 0 ? (
+                          <div style={{lineHeight:1.3}}>
+                            <div className="num" style={{fontSize:13}}>₹{(p.stockValue).toLocaleString("en-IN")}</div>
+                            <div style={{fontSize:10,color:"var(--text3)"}}>
+                              {data.summary.totalStockValue ? Math.round(100*p.stockValue/data.summary.totalStockValue*100)/100 : 0}%
+                            </div>
+                          </div>
+                        ) : <span style={{color:"var(--text3)"}}>—</span>}
                       </td>
                       <td><span className="num">{p.netSales?.d7 ?? 0}</span></td>
                       <td><span className="num">{p.netSales?.d15 ?? 0}</span></td>
