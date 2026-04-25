@@ -30,7 +30,7 @@ from pathlib import Path
 # For local PC run: set hardcoded values here
 BL_TOKEN       = "9000673-9001055-9YAD5J5NW96PT0AYFMWLNM1I1Q3XW1L4VVJ5GKJ06ORMJA65LAEZN8FMKPZRDLMN"   # ← paste your Stock Notifier BL token
 GITHUB_TOKEN   = "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"                # ← GitHub Personal Access Token (see setup)
-GMAIL_APP_PASS = os.environ.get("GMAIL_APP_PASS", "xxxx xxxx xxxx xxxx")
+GMAIL_APP_PASS = os.environ.get("GMAIL_APP_PASS", "jkcd qwlx ehvn iasi")
 
 GITHUB_REPO    = "weaversvilla/weavers-stock"
 GITHUB_FILE    = "public/report_data.json"
