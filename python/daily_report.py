@@ -29,7 +29,7 @@ from pathlib import Path
 # Tokens — read from environment variables (GitHub Actions Secrets)
 # For local PC run: set hardcoded values here
 BL_TOKEN       = os.environ.get("BL_TOKEN",       "9000673-9001055-9YAD5J5NW96PT0AYFMWLNM1I1Q3XW1L4VVJ5GKJ06ORMJA65LAEZN8FMKPZRDLMN")
-GITHUB_TOKEN   = os.environ.get("GH_PAT",         os.environ.get("GITHUB_TOKEN", "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"))
+GITHUB_TOKEN   = os.environ.get("GH_PAT",         os.environ.get("GITHUB_TOKEN", ""))
 GMAIL_APP_PASS = os.environ.get("GMAIL_APP_PASS", "jkcd qwlx ehvn iasi")
 
 GITHUB_REPO    = "weaversvilla/weavers-stock"
