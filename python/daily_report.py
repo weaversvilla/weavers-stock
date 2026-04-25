@@ -28,9 +28,9 @@ from pathlib import Path
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
 # Tokens — read from environment variables (GitHub Actions Secrets)
 # For local PC run: set hardcoded values here
-BL_TOKEN       = os.environ.get("BL_TOKEN",       "9000673-9001055-9YAD5J5NW96PT0AYFMWLNM1I1Q3XW1L4VVJ5GKJ06ORMJA65LAEZN8FMKPZRDLMN")
-GITHUB_TOKEN   = os.environ.get("GH_PAT",         os.environ.get("GITHUB_TOKEN", "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"))
-GMAIL_APP_PASS = os.environ.get("GMAIL_APP_PASS", "jkcd qwlx ehvn iasi")
+BL_TOKEN       = os.environ.get("BL_TOKEN",       "YOUR_STOCK_NOTIFIER_BL_TOKEN")
+GITHUB_TOKEN   = os.environ.get("GH_PAT",         os.environ.get("GITHUB_TOKEN", "YOUR_GITHUB_PAT"))
+GMAIL_APP_PASS = os.environ.get("GMAIL_APP_PASS", "xxxx xxxx xxxx xxxx")
 
 GITHUB_REPO    = "weaversvilla/weavers-stock"
 GITHUB_FILE    = "public/report_data.json"
@@ -565,6 +565,9 @@ def build_report():
 # ── Upload to GitHub ──────────────────────────────────────────────────────────
 def upload_to_github(data):
     print("Uploading report to GitHub...")
+    # Debug: show first 10 chars of token to verify correct one is being used
+    token_preview = GITHUB_TOKEN[:10] + "..." if GITHUB_TOKEN and len(GITHUB_TOKEN) > 10 else "EMPTY/MISSING"
+    print(f"  Using token: {token_preview}")
     content = json.dumps(data, ensure_ascii=False)
     encoded = base64.b64encode(content.encode()).decode()
 
