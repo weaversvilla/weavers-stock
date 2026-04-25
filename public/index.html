@@ -468,35 +468,25 @@ function App() {
           </div>
 
           {/* Inventory Value Bar */}
-          <div className="seasonal-bar" style={{marginBottom:20,gap:24}}>
-            <span className="seasonal-label">📦 Total Inventory Value</span>
-            <div style={{display:"flex",flexDirection:"column",gap:2}}>
-              <span style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"var(--accent)"}}>
-                ₹{(data.summary.totalStockValue||0).toLocaleString("en-IN")}
-              </span>
+          <div className="seasonal-bar" style={{marginBottom:20,gap:0,justifyContent:"flex-start"}}>
+            <span className="seasonal-label" style={{marginRight:20}}>📦 Total Inventory Value</span>
+            <div style={{display:"flex",alignItems:"baseline",gap:6,marginRight:28}}>
+              <span style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"var(--accent)"}}>₹{(data.summary.totalStockValue||0).toLocaleString("en-IN")}</span>
               <span style={{fontSize:11,color:"var(--text3)",letterSpacing:1,textTransform:"uppercase"}}>Total</span>
             </div>
-            <div style={{display:"flex",flexDirection:"column",gap:2}}>
-              <span style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"var(--accent3)"}}>
-                ₹{(data.summary.healthyStockValue||0).toLocaleString("en-IN")}
+            <div style={{display:"flex",alignItems:"baseline",gap:6,marginRight:28}}>
+              <span style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"var(--accent3)"}}>₹{(data.summary.healthyStockValue||0).toLocaleString("en-IN")}</span>
+              <span style={{fontSize:11,fontWeight:700,color:"var(--accent3)"}}>
+                {data.summary.totalStockValue ? Math.round(100*(data.summary.healthyStockValue||0)/data.summary.totalStockValue) : 0}%
               </span>
-              <span style={{fontSize:11,letterSpacing:1,textTransform:"uppercase"}}>
-                <span style={{color:"var(--accent3)",fontWeight:700}}>
-                  {data.summary.totalStockValue ? Math.round(100*(data.summary.healthyStockValue||0)/data.summary.totalStockValue) : 0}%
-                </span>
-                <span style={{color:"var(--text3)",marginLeft:4}}>Healthy</span>
-              </span>
+              <span style={{fontSize:11,color:"var(--text3)",letterSpacing:1,textTransform:"uppercase"}}>Healthy</span>
             </div>
-            <div style={{display:"flex",flexDirection:"column",gap:2}}>
-              <span style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"var(--accent2)"}}>
-                ₹{(data.summary.deadStockValue||0).toLocaleString("en-IN")}
+            <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+              <span style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"var(--accent2)"}}>₹{(data.summary.deadStockValue||0).toLocaleString("en-IN")}</span>
+              <span style={{fontSize:11,fontWeight:700,color:"var(--accent2)"}}>
+                {data.summary.totalStockValue ? Math.round(100*(data.summary.deadStockValue||0)/data.summary.totalStockValue) : 0}%
               </span>
-              <span style={{fontSize:11,letterSpacing:1,textTransform:"uppercase"}}>
-                <span style={{color:"var(--accent2)",fontWeight:700}}>
-                  {data.summary.totalStockValue ? Math.round(100*(data.summary.deadStockValue||0)/data.summary.totalStockValue) : 0}%
-                </span>
-                <span style={{color:"var(--text3)",marginLeft:4}}>Dead Stock</span>
-              </span>
+              <span style={{fontSize:11,color:"var(--text3)",letterSpacing:1,textTransform:"uppercase"}}>Dead Stock</span>
             </div>
           </div>
 
