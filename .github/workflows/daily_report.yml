@@ -23,7 +23,7 @@ jobs:
       - name: Run stock report
         env:
           BL_TOKEN: ${{ secrets.BL_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
           GMAIL_APP_PASS: ${{ secrets.GMAIL_APP_PASS }}
         run: python python/daily_report.py
 
@@ -34,3 +34,5 @@ jobs:
           git add python/velocity_history.csv || true
           git diff --staged --quiet || git commit -m "Daily velocity snapshot $(date +%Y-%m-%d)"
           git push || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
