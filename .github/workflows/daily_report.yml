@@ -31,8 +31,8 @@ jobs:
         run: |
           git config --global user.name "Stock Bot"
           git config --global user.email "weavers.villa@gmail.com"
-          git add python/velocity_history.csv || true
-          git diff --staged --quiet || git commit -m "Daily velocity snapshot $(date +%Y-%m-%d)"
+          git add python/velocity_history.csv python/stock_value_history.csv || true
+          git diff --staged --quiet || git commit -m "Daily snapshot $(date +%Y-%m-%d)"
           git push || true
         env:
           GITHUB_TOKEN: ${{ secrets.GH_PAT }}

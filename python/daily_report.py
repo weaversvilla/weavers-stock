@@ -28,9 +28,9 @@ from pathlib import Path
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
 # Tokens — read from environment variables (GitHub Actions Secrets)
 # For local PC run: set hardcoded values here
-BL_TOKEN       = os.environ.get("BL_TOKEN",       "9000673-9001055-9YAD5J5NW96PT0AYFMWLNM1I1Q3XW1L4VVJ5GKJ06ORMJA65LAEZN8FMKPZRDLMN")
-GITHUB_TOKEN   = os.environ.get("GH_PAT",         os.environ.get("GITHUB_TOKEN", ""))
-GMAIL_APP_PASS = os.environ.get("GMAIL_APP_PASS", "jkcd qwlx ehvn iasi")
+BL_TOKEN       = os.environ.get("BL_TOKEN",       "YOUR_STOCK_NOTIFIER_BL_TOKEN")
+GITHUB_TOKEN   = os.environ.get("GH_PAT",         os.environ.get("GITHUB_TOKEN", "YOUR_GITHUB_PAT"))
+GMAIL_APP_PASS = os.environ.get("GMAIL_APP_PASS", "xxxx xxxx xxxx xxxx")
 
 GITHUB_REPO    = "weaversvilla/weavers-stock"
 GITHUB_FILE    = "public/report_data.json"
@@ -57,7 +57,8 @@ EXCLUDED_SKUS = {
     "HT-RIBBON-SET-6",
 }
 
-SNAPSHOT_CSV   = Path(__file__).parent / "velocity_history.csv"
+SNAPSHOT_CSV      = Path(__file__).parent / "velocity_history.csv"
+VALUE_HISTORY_CSV = Path(__file__).parent / "stock_value_history.csv"
 
 PLATFORM_MAP = {
     "amazon":         [443],
@@ -645,6 +646,37 @@ def save_snapshot(products):
             })
     print(f"  Snapshot saved ({len(products)} rows).")
 
+def save_value_history(summary):
+    """Save daily total/healthy/dead stock values for trend graph."""
+    today      = datetime.now().strftime("%Y-%m-%d")
+    file_exists = VALUE_HISTORY_CSV.exists()
+
+    # Check if today already logged (avoid duplicates if run twice)
+    if file_exists:
+        with open(VALUE_HISTORY_CSV, "r", encoding="utf-8") as f:
+            last_line = f.readlines()[-1] if f.readlines() else ""
+        if last_line.startswith(today):
+            print(f"  Value history already logged for {today}, skipping.")
+            return
+
+    with open(VALUE_HISTORY_CSV, "a", newline="", encoding="utf-8") as f:
+        fieldnames = ["date","totalStockValue","healthyStockValue","deadStockValue",
+                      "totalSKUs","healthySKUs","deadSKUs","oosSKUs"]
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow({
+            "date":             today,
+            "totalStockValue":  summary.get("totalStockValue", 0),
+            "healthyStockValue":summary.get("healthyStockValue", 0),
+            "deadStockValue":   summary.get("deadStockValue", 0),
+            "totalSKUs":        summary.get("total", 0),
+            "healthySKUs":      summary.get("healthy", 0),
+            "deadSKUs":         summary.get("deadStock", 0),
+            "oosSKUs":          summary.get("outOfStock", 0),
+        })
+    print(f"  Value history saved for {today}.")
+
 # ── Send HTML email ───────────────────────────────────────────────────────────
 def send_email(data):
     summary  = data["summary"]
@@ -765,6 +797,7 @@ def main():
 
     print("\nSaving snapshot...")
     save_snapshot(data["products"])
+    save_value_history(data["summary"])
 
     print("\nUploading to GitHub...")
     upload_to_github(data)
