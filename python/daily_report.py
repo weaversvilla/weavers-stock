@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 Weavers Villa — Daily Stock Intelligence
-Runs via Windows Task Scheduler / GitHub Actions at 8am IST
+Runs via GitHub Actions at 6am IST
 1. Fetches all data from Baselinker
-2. Builds bundle map → remaps bundle sales to component SKUs
-3. Calculates velocity + reorder quantities
-4. Saves report to report_data.json
-5. Uploads to GitHub (Vercel serves it instantly)
-6. Sends HTML email to weavers.villa@gmail.com
+2. Fetches Global sales from Amazon SP-API (US/UK/UAE)
+3. Builds bundle map → remaps bundle sales to component SKUs
+4. Calculates velocity + reorder quantities
+5. Saves report to report_data.json
+6. Uploads to GitHub (Vercel serves it instantly)
+7. Sends HTML email to weavers.villa@gmail.com
 """
 
 import json
@@ -20,17 +21,48 @@ import urllib.request
 import urllib.error
 import urllib.parse
 import base64
-from datetime import datetime, timezone
+import hmac
+import hashlib
+from datetime import datetime, timezone, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 
-# ─── CONFIG ──────────────────────────────────────────────────────────────────
-# Tokens — read from environment variables (GitHub Actions Secrets)
 # For local PC run: set hardcoded values here
-BL_TOKEN       = os.environ.get("BL_TOKEN",       "YOUR_STOCK_NOTIFIER_BL_TOKEN")
-GITHUB_TOKEN   = os.environ.get("GH_PAT",         os.environ.get("GITHUB_TOKEN", "YOUR_GITHUB_PAT"))
-GMAIL_APP_PASS = os.environ.get("GMAIL_APP_PASS", "xxxx xxxx xxxx xxxx")
+BL_TOKEN       = os.environ.get("BL_TOKEN",       "")
+GITHUB_TOKEN   = os.environ.get("GH_PAT",         os.environ.get("GITHUB_TOKEN", ""))
+GMAIL_APP_PASS = os.environ.get("GMAIL_APP_PASS", "")
+
+# Amazon SP-API — Global Sales
+SP_CLIENT_ID     = os.environ.get("SP_CLIENT_ID",     "")
+SP_CLIENT_SECRET = os.environ.get("SP_CLIENT_SECRET", "")
+SP_REFRESH_US    = os.environ.get("SP_REFRESH_US",    "")
+SP_REFRESH_UK    = os.environ.get("SP_REFRESH_UK",    "")
+SP_REFRESH_UAE   = os.environ.get("SP_REFRESH_UAE",   "")
+
+MARKETPLACES = {
+    "US":  {
+        "marketplace_id": "ATVPDKIKX0DER",
+        "endpoint":       "https://sellingpartnerapi-na.amazon.com",
+        "region":         "us-east-1",
+        "refresh_token":  SP_REFRESH_US,
+    },
+    "UK":  {
+        "marketplace_id": "A1F83G8C2ARO7P",
+        "endpoint":       "https://sellingpartnerapi-eu.amazon.com",
+        "region":         "eu-west-1",
+        "refresh_token":  SP_REFRESH_UK,
+    },
+    "UAE": {
+        "marketplace_id": "A2VIGQ35RCS4UG",
+        "endpoint":       "https://sellingpartnerapi-eu.amazon.com",
+        "region":         "eu-west-1",
+        "refresh_token":  SP_REFRESH_UAE,
+    },
+}
+
+# Excel mapping file path in repo
+GLOBAL_SKU_MAP_FILE = Path(__file__).parent.parent / "data" / "global_sku_mapping.xlsx"
 
 GITHUB_REPO    = "weaversvilla/weavers-stock"
 GITHUB_FILE    = "public/report_data.json"
@@ -40,21 +72,15 @@ GMAIL_TO       = "weavers.villa@gmail.com"
 INVENTORY_ID   = 1257
 WAREHOUSE_ID   = 9001890
 TARGET_DAYS    = 90
-SEASONAL_MULT  = 1.0   # Change to 2.5 before winter season
+SEASONAL_MULT  = 1.0
 
-# Cancelled order status ID
 CANCELLED_STATUS_ID = 12225
 
-# Explicitly excluded SKUs (deleted from BL but still appearing in API)
 EXCLUDED_SKUS = {
-    "CHAIR-POPPY-SET-4",
-    "CHAIR-POPPY-SET-6",
-    "CHAIR-PRISM-SET-4",
-    "CHAIR-PRISM-SET-6",
-    "HT-RIBBON-SET-12",
-    "HT-RIBBON-SET-24",
-    "HT-RIBBON-SET-4",
-    "HT-RIBBON-SET-6",
+    "CHAIR-POPPY-SET-4", "CHAIR-POPPY-SET-6",
+    "CHAIR-PRISM-SET-4", "CHAIR-PRISM-SET-6",
+    "HT-RIBBON-SET-12",  "HT-RIBBON-SET-24",
+    "HT-RIBBON-SET-4",   "HT-RIBBON-SET-6",
 }
 
 SNAPSHOT_CSV      = Path(__file__).parent / "velocity_history.csv"
@@ -73,7 +99,7 @@ WEIGHTS = {"d7": 0.40, "d15": 0.30, "d30": 0.20, "d90": 0.10}
 # ─────────────────────────────────────────────────────────────────────────────
 
 BL_URL = "https://api.baselinker.com/connector.php"
-socket.setdefaulttimeout(60)  # Global 60s timeout for all network calls
+socket.setdefaulttimeout(60)
 
 def bl_call(method, params={}):
     """Make a Baselinker API call with rate limit and timeout handling."""
@@ -118,6 +144,228 @@ def get_platform(source_id):
         if source_id in ids:
             return name
     return "others"
+
+# ── Amazon SP-API — Global Sales ──────────────────────────────────────────────
+
+def sp_get_access_token(refresh_token):
+    """Exchange refresh token for access token."""
+    data = urllib.parse.urlencode({
+        "grant_type":    "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id":     SP_CLIENT_ID,
+        "client_secret": SP_CLIENT_SECRET,
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.amazon.com/auth/o2/token",
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        result = json.loads(resp.read().decode())
+    return result["access_token"]
+
+def sp_get_orders(marketplace, days=90):
+    """Fetch orders from SP-API for a marketplace."""
+    if not marketplace["refresh_token"]:
+        return []
+
+    try:
+        access_token = sp_get_access_token(marketplace["refresh_token"])
+    except Exception as e:
+        print(f"    Token error: {e}")
+        return []
+
+    created_after = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    endpoint      = marketplace["endpoint"]
+    market_id     = marketplace["marketplace_id"]
+
+    all_orders = []
+    next_token = None
+
+    while True:
+        params = {
+            "MarketplaceIds": market_id,
+            "CreatedAfter":   created_after,
+            "OrderStatuses":  "Shipped,Unshipped,PartiallyShipped,Pending,InvoiceUnconfirmed",
+        }
+        if next_token:
+            params = {"NextToken": next_token, "MarketplaceIds": market_id}
+
+        url = f"{endpoint}/orders/v0/orders?" + urllib.parse.urlencode(params)
+        req = urllib.request.Request(url, headers={
+            "x-amz-access-token": access_token,
+            "Content-Type":       "application/json",
+        })
+
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode())
+        except Exception as e:
+            print(f"    SP-API orders error: {e}")
+            break
+
+        orders = data.get("payload", {}).get("Orders", [])
+        all_orders.extend(orders)
+
+        next_token = data.get("payload", {}).get("NextToken")
+        if not next_token:
+            break
+        time.sleep(0.5)
+
+    return all_orders
+
+def sp_get_order_items(marketplace, order_id, access_token):
+    """Fetch line items for a single SP-API order."""
+    endpoint = marketplace["endpoint"]
+    url = f"{endpoint}/orders/v0/orders/{order_id}/orderItems"
+    req = urllib.request.Request(url, headers={
+        "x-amz-access-token": access_token,
+        "Content-Type":       "application/json",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode())
+        return data.get("payload", {}).get("OrderItems", [])
+    except:
+        return []
+
+def load_global_sku_mapping():
+    """Load global_sku → master_sku mapping from Excel file."""
+    if not GLOBAL_SKU_MAP_FILE.exists():
+        print(f"  ⚠️ Global SKU mapping file not found: {GLOBAL_SKU_MAP_FILE}")
+        return {}
+
+    try:
+        # Read Excel without openpyxl dependency using csv fallback
+        # Try openpyxl first
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(GLOBAL_SKU_MAP_FILE)
+            ws = wb.active
+            rows = list(ws.iter_rows(values_only=True))
+            headers = [str(h).lower().strip() if h else "" for h in rows[0]]
+            g_idx = headers.index("global_sku")
+            m_idx = headers.index("master_sku")
+            mapping = {}
+            for row in rows[1:]:
+                if row[g_idx] and row[m_idx]:
+                    mapping[str(row[g_idx]).strip()] = str(row[m_idx]).strip()
+            print(f"  Global SKU mapping loaded: {len(mapping)} entries.")
+            return mapping
+        except ImportError:
+            print("  openpyxl not installed, installing...")
+            import subprocess
+            subprocess.run(["pip", "install", "openpyxl", "--break-system-packages", "-q"])
+            import openpyxl
+            wb = openpyxl.load_workbook(GLOBAL_SKU_MAP_FILE)
+            ws = wb.active
+            rows = list(ws.iter_rows(values_only=True))
+            headers = [str(h).lower().strip() if h else "" for h in rows[0]]
+            g_idx = headers.index("global_sku")
+            m_idx = headers.index("master_sku")
+            mapping = {}
+            for row in rows[1:]:
+                if row[g_idx] and row[m_idx]:
+                    mapping[str(row[g_idx]).strip()] = str(row[m_idx]).strip()
+            print(f"  Global SKU mapping loaded: {len(mapping)} entries.")
+            return mapping
+    except Exception as e:
+        print(f"  ⚠️ Error loading SKU mapping: {e}")
+        return {}
+
+def get_global_sales(days=90):
+    """
+    Fetch sales from all global marketplaces (US/UK/UAE).
+    Returns:
+      - sales_by_master: {master_sku: {d7, d15, d30, d90}} units
+      - unmapped_skus: set of global SKUs not in mapping file
+    """
+    if not SP_CLIENT_ID or not SP_CLIENT_SECRET:
+        print("  SP-API credentials not configured, skipping global sales.")
+        return {}, set()
+
+    print("Loading global SKU mapping...")
+    sku_map = load_global_sku_mapping()
+
+    sales_raw   = {}  # {master_sku: [(order_date, qty)]}
+    unmapped    = set()
+    now         = datetime.now(timezone.utc)
+    cutoffs     = {
+        "d7":  now - timedelta(days=7),
+        "d15": now - timedelta(days=15),
+        "d30": now - timedelta(days=30),
+        "d90": now - timedelta(days=90),
+    }
+
+    for market_name, marketplace in MARKETPLACES.items():
+        if not marketplace["refresh_token"]:
+            print(f"  {market_name}: No refresh token, skipping.")
+            continue
+
+        print(f"  Fetching {market_name} orders...")
+        try:
+            access_token = sp_get_access_token(marketplace["refresh_token"])
+        except Exception as e:
+            print(f"  {market_name}: Token error: {e}")
+            continue
+
+        orders = sp_get_orders(marketplace, days=days)
+        print(f"  {market_name}: {len(orders)} orders fetched.")
+
+        # Fetch line items for each order
+        for i, order in enumerate(orders):
+            order_id     = order.get("AmazonOrderId")
+            order_date   = order.get("PurchaseDate", "")
+            order_status = order.get("OrderStatus", "")
+
+            # Skip cancelled orders
+            if order_status == "Canceled":
+                continue
+
+            try:
+                order_dt = datetime.strptime(order_date, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            except:
+                continue
+
+            items = sp_get_order_items(marketplace, order_id, access_token)
+            time.sleep(0.1)
+
+            for item in items:
+                global_sku = item.get("SellerSKU", "")
+                qty        = int(item.get("QuantityOrdered", 0))
+                if not global_sku or qty == 0:
+                    continue
+
+                master_sku = sku_map.get(global_sku)
+                if not master_sku:
+                    unmapped.add(global_sku)
+                    continue
+
+                if master_sku not in sales_raw:
+                    sales_raw[master_sku] = []
+                sales_raw[master_sku].append((order_dt, qty))
+
+        print(f"  {market_name}: Done.")
+
+    # Aggregate into time windows
+    sales_by_master = {}
+    for master_sku, entries in sales_raw.items():
+        sales_by_master[master_sku] = {
+            "d7":  sum(q for dt, q in entries if dt >= cutoffs["d7"]),
+            "d15": sum(q for dt, q in entries if dt >= cutoffs["d15"]),
+            "d30": sum(q for dt, q in entries if dt >= cutoffs["d30"]),
+            "d90": sum(q for dt, q in entries),
+        }
+
+    if unmapped:
+        print(f"\n  ⚠️ {len(unmapped)} Global SKUs not mapped to Master SKUs:")
+        for s in sorted(unmapped):
+            print(f"     {s}")
+        print(f"  → Add these to data/global_sku_mapping.xlsx\n")
+
+    print(f"  Global sales mapped: {len(sales_by_master)} master SKUs with global orders.")
+    return sales_by_master, unmapped
 
 # ── Fetch all inventory products ─────────────────────────────────────────────
 def get_all_products():
@@ -435,18 +683,20 @@ def build_report():
     }
     print(f"  Cancelled orders in 90d: {len(cancelled_order_ids)}")
 
-    # Filter to 90-day window (already is, but ensure clean)
     orders90 = [o for o in all_orders if (o.get("date_confirmed") or o.get("date_add", 0)) >= from90]
 
-    # Fetch returns from Returns panel — exclude RTO (cancelled order returns)
+    # Fetch returns from Returns panel
     print("Fetching returns from Returns panel...")
     all_panel_returns = get_returns_since(from90)
-    # Fetch ALL return statuses — exclude only Rejected (5829)
-    # Rejected = return refused by seller, stock never came back
     REJECTED_STATUS_ID = 5829
     valid_returns = [r for r in all_panel_returns if r.get("status_id") != REJECTED_STATUS_ID]
     panel_returns = [r for r in valid_returns if r.get("order_id") not in cancelled_order_ids]
     print(f"  Valid returns (excl. rejected + RTO): {len(panel_returns)} of {len(all_panel_returns)}")
+
+    # Fetch global sales from Amazon SP-API
+    print("\nFetching Global Sales (US/UK/UAE)...")
+    global_sales, unmapped_skus = get_global_sales(days=90)
+    print(f"  Global sales: {len(global_sales)} master SKUs\n")
 
     ts = {"d7": days_ago(7), "d15": days_ago(15), "d30": days_ago(30)}
 
@@ -470,6 +720,19 @@ def build_report():
         "d30": aggregate_sales(orders_d30, bundle_map, id_to_sku),
         "d90": aggregate_sales(orders90,   bundle_map, id_to_sku),
     }
+
+    # Merge global sales into BL sales
+    for window in ["d7", "d15", "d30", "d90"]:
+        for master_sku, global_window in global_sales.items():
+            qty = global_window.get(window, 0)
+            if qty == 0:
+                continue
+            if master_sku not in sales[window]:
+                sales[window][master_sku] = {"total": 0, "amazon": 0, "amazon_vendor": 0,
+                                              "flipkart": 0, "myntra": 0, "ajio": 0,
+                                              "others": 0, "global": 0}
+            sales[window][master_sku]["total"]  = sales[window][master_sku].get("total", 0) + qty
+            sales[window][master_sku]["global"] = sales[window][master_sku].get("global", 0) + qty
 
     # Merge returns from orders panel + returns panel
     def merge_returns(orders_ret, panel_ret):
@@ -521,6 +784,7 @@ def build_report():
             "myntra":        sales["d30"].get(sku, {}).get("myntra", 0),
             "ajio":          sales["d30"].get(sku, {}).get("ajio", 0),
             "others":        sales["d30"].get(sku, {}).get("others", 0),
+            "global":        sales["d30"].get(sku, {}).get("global", 0),
         }
 
         metrics    = calc_metrics(current_stock, net_sales)
@@ -569,6 +833,8 @@ def build_report():
         "totalStockValue":   sum(p["stockValue"] for p in report),
         "deadStockValue":    sum(p["stockValue"] for p in report if p["isDeadStock"]),
         "healthyStockValue": sum(p["stockValue"] for p in report if p["status"] == "HEALTHY" and not p["isDeadStock"]),
+        "globalSKUsCount":   len(global_sales),
+        "unmappedGlobalSKUs": sorted(list(unmapped_skus)),
         "generatedAt":      datetime.now(timezone.utc).isoformat(),
         "seasonalMult":     SEASONAL_MULT,
     }
@@ -699,12 +965,19 @@ def send_email(data):
     def platform_cell(p):
         ps    = p.get("platformSales", {})
         parts = []
-        if ps.get("amazon",0)>0:   parts.append(f'<span style="color:#ff9900">AM:{ps["amazon"]}</span>')
-        if ps.get("flipkart",0)>0: parts.append(f'<span style="color:#2f74ff">FL:{ps["flipkart"]}</span>')
-        if ps.get("myntra",0)>0:   parts.append(f'<span style="color:#ff3f6c">MY:{ps["myntra"]}</span>')
-        if ps.get("ajio",0)>0:     parts.append(f'<span style="color:#00c896">AJ:{ps["ajio"]}</span>')
-        if ps.get("others",0)>0:   parts.append(f'<span style="color:#a0a0a0">OT:{ps["others"]}</span>')
+        if ps.get("amazon",0)>0:        parts.append(f'<span style="color:#ff9900">AM:{ps["amazon"]}</span>')
+        if ps.get("flipkart",0)>0:      parts.append(f'<span style="color:#2f74ff">FL:{ps["flipkart"]}</span>')
+        if ps.get("myntra",0)>0:        parts.append(f'<span style="color:#ff3f6c">MY:{ps["myntra"]}</span>')
+        if ps.get("ajio",0)>0:          parts.append(f'<span style="color:#00c896">AJ:{ps["ajio"]}</span>')
+        if ps.get("global",0)>0:        parts.append(f'<span style="color:#b478ff">GL:{ps["global"]}</span>')
+        if ps.get("others",0)>0:        parts.append(f'<span style="color:#a0a0a0">OT:{ps["others"]}</span>')
         return " ".join(parts) or "—"
+
+    # Unmapped global SKUs warning
+    unmapped = summary.get("unmappedGlobalSKUs", [])
+    unmapped_note = ""
+    if unmapped:
+        unmapped_note = f'<div style="background:rgba(240,165,0,0.1);border:1px solid rgba(240,165,0,0.3);border-radius:8px;padding:12px 16px;margin-bottom:20px;color:#f0a500">⚠ <strong>{len(unmapped)} Global SKUs not mapped</strong> → add to data/global_sku_mapping.xlsx:<br><span style="font-family:monospace;font-size:12px;color:#ccc">{", ".join(unmapped[:10])}{"..." if len(unmapped) > 10 else ""}</span></div>'
 
     def product_rows(plist, limit=50):
         rows = ""
@@ -753,6 +1026,7 @@ def send_email(data):
     <div style="font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#f0a500;margin-top:4px">Daily Stock Intelligence — {now}</div>
     {seasonal_note}
   </div>
+  {unmapped_note}
   <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:32px">
     {"".join(f'<div style="background:#111118;border:1px solid #2a2a3a;border-radius:10px;padding:16px 20px;min-width:110px"><div style="font-size:32px;font-weight:800;color:{c}">{v}</div><div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:4px">{l}</div></div>'
     for c,v,l in [
