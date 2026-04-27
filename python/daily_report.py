@@ -28,7 +28,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 
-# For local PC run: set hardcoded values here
+# ─── CONFIG ──────────────────────────────────────────────────────────────────
 BL_TOKEN       = os.environ.get("BL_TOKEN",       "")
 GITHUB_TOKEN   = os.environ.get("GH_PAT",         os.environ.get("GITHUB_TOKEN", ""))
 GMAIL_APP_PASS = os.environ.get("GMAIL_APP_PASS", "")
@@ -213,22 +213,30 @@ def sp_get_orders(marketplace, days=90):
             break
         time.sleep(0.5)
 
-    return all_orders
+    return all_orders, access_token  # Return access_token to reuse
 
 def sp_get_order_items(marketplace, order_id, access_token):
-    """Fetch line items for a single SP-API order."""
+    """Fetch line items for a single SP-API order with retry on rate limit."""
     endpoint = marketplace["endpoint"]
     url = f"{endpoint}/orders/v0/orders/{order_id}/orderItems"
     req = urllib.request.Request(url, headers={
         "x-amz-access-token": access_token,
         "Content-Type":       "application/json",
     })
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode())
-        return data.get("payload", {}).get("OrderItems", [])
-    except:
-        return []
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode())
+            return data.get("payload", {}).get("OrderItems", [])
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                wait = 2 ** attempt
+                time.sleep(wait)
+                continue
+            return []
+        except:
+            return []
+    return []
 
 def load_global_sku_mapping():
     """Load global_sku → master_sku mapping from Excel file."""
@@ -288,7 +296,7 @@ def get_global_sales(days=90):
     print("Loading global SKU mapping...")
     sku_map = load_global_sku_mapping()
 
-    sales_raw   = {}  # {master_sku: [(order_date, qty)]}
+    sales_raw   = {}
     unmapped    = set()
     now         = datetime.now(timezone.utc)
     cutoffs     = {
@@ -305,23 +313,21 @@ def get_global_sales(days=90):
 
         print(f"  Fetching {market_name} orders...")
         try:
-            access_token = sp_get_access_token(marketplace["refresh_token"])
+            orders, access_token = sp_get_orders(marketplace, days=days)
         except Exception as e:
-            print(f"  {market_name}: Token error: {e}")
+            print(f"  {market_name}: Error: {e}")
             continue
 
-        orders = sp_get_orders(marketplace, days=days)
-        print(f"  {market_name}: {len(orders)} orders fetched.")
+        # Filter cancelled before fetching items
+        valid_orders = [o for o in orders if o.get("OrderStatus") != "Canceled"]
+        print(f"  {market_name}: {len(valid_orders)} valid orders. Fetching items...")
 
-        # Fetch line items for each order
-        for i, order in enumerate(orders):
-            order_id     = order.get("AmazonOrderId")
-            order_date   = order.get("PurchaseDate", "")
-            order_status = order.get("OrderStatus", "")
+        for i, order in enumerate(valid_orders):
+            if i % 200 == 0 and i > 0:
+                print(f"    {market_name}: {i}/{len(valid_orders)} processed...")
 
-            # Skip cancelled orders
-            if order_status == "Canceled":
-                continue
+            order_id   = order.get("AmazonOrderId")
+            order_date = order.get("PurchaseDate", "")
 
             try:
                 order_dt = datetime.strptime(order_date, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
@@ -329,7 +335,7 @@ def get_global_sales(days=90):
                 continue
 
             items = sp_get_order_items(marketplace, order_id, access_token)
-            time.sleep(0.1)
+            time.sleep(0.05)  # 20 req/sec for order items API
 
             for item in items:
                 global_sku = item.get("SellerSKU", "")
