@@ -222,28 +222,226 @@ def sp_get_orders(marketplace, days=90):
 
     return all_orders, access_token  # Return access_token to reuse
 
-def sp_get_order_items(marketplace, order_id, access_token):
-    """Fetch line items for a single SP-API order with retry on rate limit."""
+def sp_request_report(marketplace, access_token, days=90):
+    """Request a flat file orders report from SP-API Reports API."""
+    endpoint     = marketplace["endpoint"]
+    market_id    = marketplace["marketplace_id"]
+    created_after = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    payload = json.dumps({
+        "reportType":        "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL",
+        "marketplaceIds":    [market_id],
+        "dataStartTime":     created_after,
+    }).encode()
+
+    req = urllib.request.Request(
+        f"{endpoint}/reports/2021-06-30/reports",
+        data=payload,
+        headers={
+            "x-amz-access-token": access_token,
+            "Content-Type":       "application/json",
+        },
+        method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        data = json.loads(resp.read().decode())
+    return data.get("reportId")
+
+def sp_poll_report(marketplace, access_token, report_id, max_wait=300):
+    """Poll until report is ready. Returns reportDocumentId."""
     endpoint = marketplace["endpoint"]
-    url = f"{endpoint}/orders/v0/orders/{order_id}/orderItems"
+    url      = f"{endpoint}/reports/2021-06-30/reports/{report_id}"
+
+    for attempt in range(max_wait // 15):
+        time.sleep(15)
+        req = urllib.request.Request(url, headers={
+            "x-amz-access-token": access_token,
+            "Content-Type":       "application/json",
+        })
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode())
+
+        status = data.get("processingStatus")
+        print(f"    Report status: {status}")
+
+        if status == "DONE":
+            return data.get("reportDocumentId")
+        elif status in ("CANCELLED", "FATAL"):
+            raise Exception(f"Report failed with status: {status}")
+
+    raise Exception(f"Report timed out after {max_wait}s")
+
+def sp_download_report(marketplace, access_token, document_id):
+    """Download and return report content as string."""
+    endpoint = marketplace["endpoint"]
+    url      = f"{endpoint}/reports/2021-06-30/documents/{document_id}"
+
     req = urllib.request.Request(url, headers={
         "x-amz-access-token": access_token,
         "Content-Type":       "application/json",
     })
-    for attempt in range(3):
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode())
-            return data.get("payload", {}).get("OrderItems", [])
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
-                wait = 2 ** attempt
-                time.sleep(wait)
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        doc_data = json.loads(resp.read().decode())
+
+    download_url = doc_data.get("url")
+    compression  = doc_data.get("compressionAlgorithm", "")
+
+    # Download the actual file
+    with urllib.request.urlopen(download_url, timeout=60) as resp:
+        content = resp.read()
+
+    # Decompress if needed
+    if compression == "GZIP":
+        import gzip
+        content = gzip.decompress(content)
+
+    return content.decode("utf-8", errors="replace")
+
+def parse_orders_report(content, sku_map, cutoffs, market_name):
+    """
+    Parse flat file TSV report.
+    Returns: (sales_raw dict, unmapped set)
+    """
+    sales_raw = {}
+    unmapped  = set()
+    lines     = content.strip().split("\n")
+
+    if len(lines) < 2:
+        return sales_raw, unmapped
+
+    headers = lines[0].split("\t")
+
+    # Find column indices
+    def col(name):
+        for i, h in enumerate(headers):
+            if name.lower() in h.lower():
+                return i
+        return None
+
+    sku_col    = col("sku") or col("seller-sku")
+    date_col   = col("purchase-date") or col("purchase_date")
+    qty_col    = col("quantity") or col("quantity-purchased")
+    status_col = col("order-status") or col("order_status")
+
+    if sku_col is None or date_col is None or qty_col is None:
+        print(f"    ⚠️ Could not find required columns. Headers: {headers[:10]}")
+        return sales_raw, unmapped
+
+    parsed = skipped = 0
+    for line in lines[1:]:
+        cols = line.split("\t")
+        if len(cols) <= max(filter(None, [sku_col, date_col, qty_col])):
+            continue
+
+        # Skip cancelled
+        if status_col and len(cols) > status_col:
+            if "cancel" in cols[status_col].lower():
+                skipped += 1
                 continue
-            return []
+
+        global_sku = cols[sku_col].strip()
+        order_date = cols[date_col].strip()
+        try:
+            qty = int(float(cols[qty_col].strip()))
         except:
-            return []
-    return []
+            continue
+
+        if not global_sku or qty <= 0:
+            continue
+
+        try:
+            order_dt = datetime.strptime(order_date[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+        except:
+            try:
+                order_dt = datetime.strptime(order_date[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            except:
+                continue
+
+        master_sku = sku_map.get(global_sku)
+        if not master_sku:
+            unmapped.add(global_sku)
+            continue
+
+        if master_sku not in sales_raw:
+            sales_raw[master_sku] = []
+        sales_raw[master_sku].append((order_dt, qty))
+        parsed += 1
+
+    print(f"    {market_name}: {parsed} items parsed, {skipped} cancelled skipped.")
+    return sales_raw, unmapped
+
+def get_global_sales(days=90):
+    """
+    Fetch sales from all global marketplaces using SP-API Reports API.
+    Much faster than order-by-order: one file per marketplace.
+    """
+    if not SP_CLIENT_ID or not SP_CLIENT_SECRET:
+        print("  SP-API credentials not configured, skipping global sales.")
+        return {}, set()
+
+    print("Loading global SKU mapping...")
+    sku_map = load_global_sku_mapping()
+
+    all_sales_raw = {}
+    all_unmapped  = set()
+    now           = datetime.now(timezone.utc)
+    cutoffs       = {
+        "d7":  now - timedelta(days=7),
+        "d15": now - timedelta(days=15),
+        "d30": now - timedelta(days=30),
+        "d90": now - timedelta(days=90),
+    }
+
+    for market_name, marketplace in MARKETPLACES.items():
+        if not marketplace["refresh_token"]:
+            print(f"  {market_name}: No refresh token, skipping.")
+            continue
+
+        print(f"  {market_name}: Requesting orders report...")
+        try:
+            access_token = sp_get_access_token(marketplace["refresh_token"])
+            report_id    = sp_request_report(marketplace, access_token, days=days)
+            print(f"  {market_name}: Report ID {report_id}. Waiting for completion...")
+
+            document_id  = sp_poll_report(marketplace, access_token, report_id, max_wait=300)
+            print(f"  {market_name}: Downloading report...")
+
+            content      = sp_download_report(marketplace, access_token, document_id)
+            sales_raw, unmapped = parse_orders_report(content, sku_map, cutoffs, market_name)
+
+            # Merge into all_sales_raw
+            for master_sku, entries in sales_raw.items():
+                if master_sku not in all_sales_raw:
+                    all_sales_raw[master_sku] = []
+                all_sales_raw[master_sku].extend(entries)
+
+            all_unmapped.update(unmapped)
+            print(f"  {market_name}: Done. {len(sales_raw)} master SKUs with sales.")
+
+        except Exception as e:
+            print(f"  {market_name}: Error — {e}. Skipping.")
+            continue
+
+    # Aggregate into time windows
+    sales_by_master = {}
+    for master_sku, entries in all_sales_raw.items():
+        sales_by_master[master_sku] = {
+            "d7":  sum(q for dt, q in entries if dt >= cutoffs["d7"]),
+            "d15": sum(q for dt, q in entries if dt >= cutoffs["d15"]),
+            "d30": sum(q for dt, q in entries if dt >= cutoffs["d30"]),
+            "d90": sum(q for dt, q in entries),
+        }
+
+    if all_unmapped:
+        print(f"\n  ⚠️ {len(all_unmapped)} Global SKUs not mapped:")
+        for s in sorted(all_unmapped)[:10]:
+            print(f"     {s}")
+        if len(all_unmapped) > 10:
+            print(f"     ... and {len(all_unmapped)-10} more")
+        print(f"  → Add to data/global_sku_mapping.xlsx\n")
+
+    print(f"  Global sales: {len(sales_by_master)} master SKUs mapped.")
+    return sales_by_master, all_unmapped
 
 def load_global_sku_mapping():
     """Load global_sku → master_sku mapping from Excel file."""
@@ -288,101 +486,6 @@ def load_global_sku_mapping():
     except Exception as e:
         print(f"  ⚠️ Error loading SKU mapping: {e}")
         return {}
-
-def get_global_sales(days=90):
-    """
-    Fetch sales from all global marketplaces (US/UK/UAE).
-    Returns:
-      - sales_by_master: {master_sku: {d7, d15, d30, d90}} units
-      - unmapped_skus: set of global SKUs not in mapping file
-    """
-    if not SP_CLIENT_ID or not SP_CLIENT_SECRET:
-        print("  SP-API credentials not configured, skipping global sales.")
-        return {}, set()
-
-    print("Loading global SKU mapping...")
-    sku_map = load_global_sku_mapping()
-
-    sales_raw   = {}
-    unmapped    = set()
-    now         = datetime.now(timezone.utc)
-    cutoffs     = {
-        "d7":  now - timedelta(days=7),
-        "d15": now - timedelta(days=15),
-        "d30": now - timedelta(days=30),
-        "d90": now - timedelta(days=90),
-    }
-
-    for market_name, marketplace in MARKETPLACES.items():
-        if not marketplace["refresh_token"]:
-            print(f"  {market_name}: No refresh token, skipping.")
-            continue
-
-        print(f"  Fetching {market_name} orders...")
-        try:
-            orders, access_token = sp_get_orders(marketplace, days=days)
-        except Exception as e:
-            print(f"  {market_name}: Error: {e}")
-            continue
-
-        # Filter cancelled before fetching items
-        valid_orders = [o for o in orders if o.get("OrderStatus") != "Canceled"]
-        print(f"  {market_name}: {len(valid_orders)} valid orders. Fetching items (~{len(valid_orders)//60}min)...")
-        start_time = time.time()
-
-        for i, order in enumerate(valid_orders):
-            if i % 50 == 0 and i > 0:
-                elapsed = time.time() - start_time
-                rate    = i / elapsed
-                remaining = (len(valid_orders) - i) / rate if rate > 0 else 0
-                print(f"    {market_name}: {i}/{len(valid_orders)} ({remaining/60:.1f}min remaining)...")
-
-            order_id   = order.get("AmazonOrderId")
-            order_date = order.get("PurchaseDate", "")
-
-            try:
-                order_dt = datetime.strptime(order_date, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-            except:
-                continue
-
-            items = sp_get_order_items(marketplace, order_id, access_token)
-            time.sleep(0.05)  # 20 req/sec for order items API
-
-            for item in items:
-                global_sku = item.get("SellerSKU", "")
-                qty        = int(item.get("QuantityOrdered", 0))
-                if not global_sku or qty == 0:
-                    continue
-
-                master_sku = sku_map.get(global_sku)
-                if not master_sku:
-                    unmapped.add(global_sku)
-                    continue
-
-                if master_sku not in sales_raw:
-                    sales_raw[master_sku] = []
-                sales_raw[master_sku].append((order_dt, qty))
-
-        print(f"  {market_name}: Done.")
-
-    # Aggregate into time windows
-    sales_by_master = {}
-    for master_sku, entries in sales_raw.items():
-        sales_by_master[master_sku] = {
-            "d7":  sum(q for dt, q in entries if dt >= cutoffs["d7"]),
-            "d15": sum(q for dt, q in entries if dt >= cutoffs["d15"]),
-            "d30": sum(q for dt, q in entries if dt >= cutoffs["d30"]),
-            "d90": sum(q for dt, q in entries),
-        }
-
-    if unmapped:
-        print(f"\n  ⚠️ {len(unmapped)} Global SKUs not mapped to Master SKUs:")
-        for s in sorted(unmapped):
-            print(f"     {s}")
-        print(f"  → Add these to data/global_sku_mapping.xlsx\n")
-
-    print(f"  Global sales mapped: {len(sales_by_master)} master SKUs with global orders.")
-    return sales_by_master, unmapped
 
 # ── Fetch all inventory products ─────────────────────────────────────────────
 def get_all_products():
