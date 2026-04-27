@@ -2,14 +2,16 @@ name: Daily Stock Report
 
 on:
   schedule:
-    # 8:00 AM IST = 2:30 AM UTC
-    - cron: '30 2 * * *'
-  workflow_dispatch:  # Allow manual trigger from GitHub UI
+    # 6:00 AM IST = 12:30 AM UTC
+    - cron: '30 0 * * *'
+  workflow_dispatch:  # Allow manual trigger from GitHub UI only
 
 jobs:
   run-report:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Skip if triggered by the Stock Bot's own commits
+    if: github.actor != 'github-actions[bot]' && github.actor != 'Stock Bot'
 
     steps:
       - name: Checkout repository

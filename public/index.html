@@ -290,7 +290,7 @@ function App() {
       const json = await res.json();
       if (json.error) throw new Error(json.error);
       setData(json);
-      setLastFetch(new Date());
+      setLastFetch(new Date(json.summary?.generatedAt || Date.now()));
 
       // Save snapshot for seasonality
       try {
@@ -507,7 +507,7 @@ function App() {
 
           {/* Meta */}
           <div className="meta-bar">
-            <span className="meta-text">Last updated: <span>{lastFetch?.toLocaleTimeString("en-IN")}</span></span>
+            <span className="meta-text">Report generated: <span>{lastFetch?.toLocaleString("en-IN", {timeZone:"Asia/Kolkata", day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit"})}</span></span>
             <span className="meta-text">Showing: <span>{filtered.length} / {data.products.length} SKUs</span></span>
             {seasonalMult !== 1 && <span className="meta-text" style={{color:"var(--accent)"}}>Seasonal {seasonalMult}× applied to order suggestions</span>}
           </div>
