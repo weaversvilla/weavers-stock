@@ -201,6 +201,13 @@ def sp_get_orders(marketplace, days=90):
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                print(f"    SP-API rate limited, waiting 60s...")
+                time.sleep(60)
+                continue
+            print(f"    SP-API orders error: {e}")
+            break
         except Exception as e:
             print(f"    SP-API orders error: {e}")
             break
@@ -211,7 +218,7 @@ def sp_get_orders(marketplace, days=90):
         next_token = data.get("payload", {}).get("NextToken")
         if not next_token:
             break
-        time.sleep(0.5)
+        time.sleep(1.0)  # SP-API Orders list: max 1 req/sec
 
     return all_orders, access_token  # Return access_token to reuse
 
@@ -320,11 +327,15 @@ def get_global_sales(days=90):
 
         # Filter cancelled before fetching items
         valid_orders = [o for o in orders if o.get("OrderStatus") != "Canceled"]
-        print(f"  {market_name}: {len(valid_orders)} valid orders. Fetching items...")
+        print(f"  {market_name}: {len(valid_orders)} valid orders. Fetching items (~{len(valid_orders)//60}min)...")
+        start_time = time.time()
 
         for i, order in enumerate(valid_orders):
-            if i % 200 == 0 and i > 0:
-                print(f"    {market_name}: {i}/{len(valid_orders)} processed...")
+            if i % 50 == 0 and i > 0:
+                elapsed = time.time() - start_time
+                rate    = i / elapsed
+                remaining = (len(valid_orders) - i) / rate if rate > 0 else 0
+                print(f"    {market_name}: {i}/{len(valid_orders)} ({remaining/60:.1f}min remaining)...")
 
             order_id   = order.get("AmazonOrderId")
             order_date = order.get("PurchaseDate", "")
@@ -645,12 +656,25 @@ def calc_velocity(net_sales):
     return max(0.0, weighted / total_weight)
 
 def calc_metrics(current_stock, net_sales):
-    velocity      = calc_velocity(net_sales)
+    velocity       = calc_velocity(net_sales)
     days_remaining = (current_stock / velocity) if velocity > 0 else None
     suggested_order = max(0, round((TARGET_DAYS - (days_remaining or 0)) * velocity)) if velocity > 0 else 0
 
+    # Status hierarchy:
+    # Dead Stock   → velocity < 0.1 AND stock > 0 (overrides all)
+    # Out of Stock → stock = 0
+    # Critical     → days ≤ 7
+    # Low          → days ≤ 15
+    # Watch        → days ≤ 30
+    # Healthy      → 30 < days ≤ 365
+    # Overstock    → days > 365
+
+    DEAD_VELOCITY_THRESHOLD = 0.1
+
     if current_stock <= 0:
         status = "OUT_OF_STOCK"
+    elif velocity < DEAD_VELOCITY_THRESHOLD:
+        status = "DEAD_STOCK"
     elif days_remaining is None:
         status = "HEALTHY"
     elif days_remaining <= 7:
@@ -659,8 +683,10 @@ def calc_metrics(current_stock, net_sales):
         status = "LOW"
     elif days_remaining <= 30:
         status = "WATCH"
-    else:
+    elif days_remaining <= 365:
         status = "HEALTHY"
+    else:
+        status = "OVERSTOCK"
 
     return {
         "dailyVelocity":  round(velocity, 3),
@@ -794,7 +820,7 @@ def build_report():
         }
 
         metrics    = calc_metrics(current_stock, net_sales)
-        dead_stock = current_stock > 0 and net_sales["d30"] <= 0
+        dead_stock = metrics["status"] == "DEAD_STOCK"
         adj_order  = round(metrics["suggestedOrder"] * SEASONAL_MULT)
 
         report.append({
@@ -825,8 +851,8 @@ def build_report():
             "stockValue":     stock_value,
         })
 
-    status_order = {"OUT_OF_STOCK": 0, "CRITICAL": 1, "LOW": 2, "WATCH": 3, "HEALTHY": 4}
-    report.sort(key=lambda p: (p["isDeadStock"], status_order.get(p["status"], 5)))
+    status_order = {"OUT_OF_STOCK": 0, "CRITICAL": 1, "LOW": 2, "WATCH": 3, "HEALTHY": 4, "OVERSTOCK": 5, "DEAD_STOCK": 6}
+    report.sort(key=lambda p: status_order.get(p["status"], 5))
 
     summary = {
         "total":            len(report),
@@ -835,10 +861,12 @@ def build_report():
         "low":              sum(1 for p in report if p["status"] == "LOW"),
         "watch":            sum(1 for p in report if p["status"] == "WATCH"),
         "healthy":          sum(1 for p in report if p["status"] == "HEALTHY"),
-        "deadStock":        sum(1 for p in report if p["isDeadStock"]),
+        "overstock":        sum(1 for p in report if p["status"] == "OVERSTOCK"),
+        "deadStock":        sum(1 for p in report if p["status"] == "DEAD_STOCK"),
         "totalStockValue":   sum(p["stockValue"] for p in report),
-        "deadStockValue":    sum(p["stockValue"] for p in report if p["isDeadStock"]),
-        "healthyStockValue": sum(p["stockValue"] for p in report if p["status"] == "HEALTHY" and not p["isDeadStock"]),
+        "deadStockValue":    sum(p["stockValue"] for p in report if p["status"] == "DEAD_STOCK"),
+        "healthyStockValue": sum(p["stockValue"] for p in report if p["status"] == "HEALTHY"),
+        "overstockValue":    sum(p["stockValue"] for p in report if p["status"] == "OVERSTOCK"),
         "globalSKUsCount":   len(global_sales),
         "unmappedGlobalSKUs": sorted(list(unmapped_skus)),
         "generatedAt":      datetime.now(timezone.utc).isoformat(),
@@ -955,9 +983,10 @@ def send_email(data):
     products = data["products"]
     now      = datetime.now().strftime("%d %b %Y, %I:%M %p IST")
 
-    urgent = sorted([p for p in products if p["status"] in ("OUT_OF_STOCK","CRITICAL") and not p["isDeadStock"]], key=lambda x: x["suggestedOrder"], reverse=True)
-    low    = sorted([p for p in products if p["status"] in ("LOW","WATCH") and not p["isDeadStock"]], key=lambda x: x["suggestedOrder"], reverse=True)
-    dead   = [p for p in products if p["isDeadStock"]]
+    urgent = sorted([p for p in products if p["status"] in ("OUT_OF_STOCK","CRITICAL")], key=lambda x: x["suggestedOrder"], reverse=True)
+    low    = sorted([p for p in products if p["status"] in ("LOW","WATCH")], key=lambda x: x["suggestedOrder"], reverse=True)
+    dead   = [p for p in products if p["status"] == "DEAD_STOCK"]
+    over   = [p for p in products if p["status"] == "OVERSTOCK"]
 
     STATUS_COLOR = {
         "OUT_OF_STOCK": "#e05c5c", "CRITICAL": "#f07830",
