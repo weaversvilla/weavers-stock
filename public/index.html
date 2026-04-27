@@ -84,6 +84,7 @@ body::before{
 .stat-card.low::before{background:var(--accent)}
 .stat-card.watch::before{background:#a0a0ff}
 .stat-card.healthy::before{background:var(--accent3)}
+.stat-card.overstock::before{background:#5ca0ff}
 .stat-card.dead::before{background:var(--text3)}
 .stat-num{font-size:36px;font-weight:800;line-height:1;font-family:var(--mono)}
 .stat-card.oos .stat-num{color:var(--accent2)}
@@ -91,6 +92,7 @@ body::before{
 .stat-card.low .stat-num{color:var(--accent)}
 .stat-card.watch .stat-num{color:#a0a0ff}
 .stat-card.healthy .stat-num{color:var(--accent3)}
+.stat-card.overstock .stat-num{color:#5ca0ff}
 .stat-card.dead .stat-num{color:var(--text3)}
 .stat-label{font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);margin-top:6px}
 
@@ -141,8 +143,10 @@ tbody tr.dead-stock{opacity:0.85}
 .badge.WATCH .badge-dot{background:#a0a0ff}
 .badge.HEALTHY{background:rgba(92,224,160,0.12);color:var(--accent3)}
 .badge.HEALTHY .badge-dot{background:var(--accent3)}
-.badge.DEAD{background:rgba(90,90,122,0.2);color:var(--text3)}
-.badge.DEAD .badge-dot{background:var(--text3)}
+.badge.OVERSTOCK{background:rgba(92,160,255,0.12);color:#5ca0ff}
+.badge.OVERSTOCK .badge-dot{background:#5ca0ff}
+.badge.DEAD_STOCK{background:rgba(90,90,122,0.2);color:var(--text3)}
+.badge.DEAD_STOCK .badge-dot{background:var(--text3)}
 
 /* Platform pills */
 .platform-wrap{display:flex;gap:4px;flex-wrap:wrap}
@@ -242,10 +246,12 @@ const DATA_URL = "https://raw.githubusercontent.com/weaversvilla/weavers-stock/m
 
 const STATUS_LABELS = {
   OUT_OF_STOCK: "Out of Stock",
-  CRITICAL: "Critical",
-  LOW: "Low",
-  WATCH: "Watch",
-  HEALTHY: "Healthy",
+  CRITICAL:     "Critical",
+  LOW:          "Low",
+  WATCH:        "Watch",
+  HEALTHY:      "Healthy",
+  OVERSTOCK:    "Overstock",
+  DEAD_STOCK:   "Dead Stock",
 };
 
 function App() {
@@ -315,8 +321,7 @@ function App() {
   const filtered = useMemo(() => {
     if (!data) return [];
     let result = data.products.filter((p) => {
-      if (deadFilter && !p.isDeadStock) return false;
-      if (!deadFilter && statusFilter !== "ALL" && p.status !== statusFilter) return false;
+      if (statusFilter !== "ALL" && p.status !== statusFilter) return false;
       if (platformFilter !== "ALL") {
         const plat = platformFilter.toLowerCase();
         if ((p.platformSales?.[plat] || 0) === 0) return false;
@@ -445,33 +450,38 @@ function App() {
         <>
           {/* Summary */}
           <div className="summary">
-            <div className={`stat-card oos ${!deadFilter && statusFilter==="OUT_OF_STOCK" ? "active-filter":""}`}
+            <div className={`stat-card oos ${statusFilter==="OUT_OF_STOCK" && !deadFilter ? "active-filter":""}`}
               onClick={() => { setStatusFilter("OUT_OF_STOCK"); setDeadFilter(false); }}>
               <div className="stat-num">{data.summary.outOfStock}</div>
               <div className="stat-label">Out of Stock</div>
             </div>
-            <div className={`stat-card critical ${!deadFilter && statusFilter==="CRITICAL" ? "active-filter":""}`}
+            <div className={`stat-card critical ${statusFilter==="CRITICAL" && !deadFilter ? "active-filter":""}`}
               onClick={() => { setStatusFilter("CRITICAL"); setDeadFilter(false); }}>
               <div className="stat-num">{data.summary.critical}</div>
               <div className="stat-label">Critical &lt;7d</div>
             </div>
-            <div className={`stat-card low ${!deadFilter && statusFilter==="LOW" ? "active-filter":""}`}
+            <div className={`stat-card low ${statusFilter==="LOW" && !deadFilter ? "active-filter":""}`}
               onClick={() => { setStatusFilter("LOW"); setDeadFilter(false); }}>
               <div className="stat-num">{data.summary.low}</div>
               <div className="stat-label">Low &lt;15d</div>
             </div>
-            <div className={`stat-card watch ${!deadFilter && statusFilter==="WATCH" ? "active-filter":""}`}
+            <div className={`stat-card watch ${statusFilter==="WATCH" && !deadFilter ? "active-filter":""}`}
               onClick={() => { setStatusFilter("WATCH"); setDeadFilter(false); }}>
               <div className="stat-num">{data.summary.watch}</div>
               <div className="stat-label">Watch &lt;30d</div>
             </div>
-            <div className={`stat-card healthy ${!deadFilter && statusFilter==="HEALTHY" ? "active-filter":""}`}
+            <div className={`stat-card healthy ${statusFilter==="HEALTHY" && !deadFilter ? "active-filter":""}`}
               onClick={() => { setStatusFilter("HEALTHY"); setDeadFilter(false); }}>
               <div className="stat-num">{data.summary.healthy}</div>
               <div className="stat-label">Healthy</div>
             </div>
-            <div className={`stat-card dead ${deadFilter ? "active-filter":""}`}
-              onClick={() => { setDeadFilter(!deadFilter); setStatusFilter("ALL"); }}>
+            <div className={`stat-card overstock ${statusFilter==="OVERSTOCK" && !deadFilter ? "active-filter":""}`}
+              onClick={() => { setStatusFilter("OVERSTOCK"); setDeadFilter(false); }}>
+              <div className="stat-num">{data.summary.overstock||0}</div>
+              <div className="stat-label">Overstock &gt;365d</div>
+            </div>
+            <div className={`stat-card dead ${statusFilter==="DEAD_STOCK" && !deadFilter ? "active-filter":""}`}
+              onClick={() => { setStatusFilter("DEAD_STOCK"); setDeadFilter(false); }}>
               <div className="stat-num">{data.summary.deadStock}</div>
               <div className="stat-label">Dead Stock</div>
             </div>
@@ -490,6 +500,13 @@ function App() {
                 {data.summary.totalStockValue ? Math.round(100*(data.summary.healthyStockValue||0)/data.summary.totalStockValue) : 0}%
               </span>
               <span style={{fontSize:11,color:"var(--text3)",letterSpacing:1,textTransform:"uppercase"}}>Healthy</span>
+            </div>
+            <div style={{display:"flex",alignItems:"baseline",gap:6,marginRight:28}}>
+              <span style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"#5ca0ff"}}>₹{(data.summary.overstockValue||0).toLocaleString("en-IN")}</span>
+              <span style={{fontSize:11,fontWeight:700,color:"#5ca0ff"}}>
+                {data.summary.totalStockValue ? Math.round(100*(data.summary.overstockValue||0)/data.summary.totalStockValue) : 0}%
+              </span>
+              <span style={{fontSize:11,color:"var(--text3)",letterSpacing:1,textTransform:"uppercase"}}>Overstock</span>
             </div>
             <div style={{display:"flex",alignItems:"baseline",gap:6}}>
               <span style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"var(--accent2)"}}>₹{(data.summary.deadStockValue||0).toLocaleString("en-IN")}</span>
@@ -528,16 +545,12 @@ function App() {
               <span className="search-icon">⌕</span>
               <input className="search" placeholder="Search by name or SKU..." value={search} onChange={e => setSearch(e.target.value)}/>
             </div>
-            {["ALL","OUT_OF_STOCK","CRITICAL","LOW","WATCH","HEALTHY"].map(s => (
-              <button key={s} className={`filter-btn ${!deadFilter && statusFilter===s ? "active":""}`}
+            {["ALL","OUT_OF_STOCK","CRITICAL","LOW","WATCH","HEALTHY","OVERSTOCK","DEAD_STOCK"].map(s => (
+              <button key={s} className={`filter-btn ${statusFilter===s && !deadFilter ? "active":""}`}
                 onClick={() => { setStatusFilter(s); setDeadFilter(false); }}>
                 {s === "ALL" ? "All" : STATUS_LABELS[s] || s}
               </button>
             ))}
-            <button className={`filter-btn ${deadFilter ? "active":""}`}
-              onClick={() => { setDeadFilter(!deadFilter); setStatusFilter("ALL"); }}>
-              💀 Dead Stock
-            </button>
           </div>
 
           {/* Platform filter */}
@@ -597,10 +610,7 @@ function App() {
                   return (
                     <tr key={p.productId} className={p.isDeadStock ? "dead-stock" : ""}>
                       <td>
-                        {p.isDeadStock
-                          ? <span className="badge DEAD"><span className="badge-dot"/>&nbsp;Dead Stock</span>
-                          : <span className={`badge ${p.status}`}><span className="badge-dot"/>&nbsp;{STATUS_LABELS[p.status]}</span>
-                        }
+                        <span className={`badge ${p.status}`}><span className="badge-dot"/>&nbsp;{STATUS_LABELS[p.status] || p.status}</span>
                       </td>
                       <td><span className="sku">{p.sku}</span></td>
                       <td className="name-cell">
