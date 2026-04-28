@@ -222,16 +222,22 @@ def sp_get_orders(marketplace, days=90):
 
     return all_orders, access_token  # Return access_token to reuse
 
-def sp_request_report(marketplace, access_token, days=90):
-    """Request a flat file orders report from SP-API Reports API."""
-    endpoint     = marketplace["endpoint"]
-    market_id    = marketplace["marketplace_id"]
-    created_after = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+def sp_request_report(marketplace, access_token, start_dt=None, end_dt=None, days=30):
+    """Request a flat file orders report from SP-API Reports API. Max 30 days per request."""
+    endpoint  = marketplace["endpoint"]
+    market_id = marketplace["marketplace_id"]
+    now       = datetime.now(timezone.utc)
+
+    if start_dt is None:
+        start_dt = now - timedelta(days=min(days, 30))
+    if end_dt is None:
+        end_dt = now
 
     payload = json.dumps({
-        "reportType":        "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL",
-        "marketplaceIds":    [market_id],
-        "dataStartTime":     created_after,
+        "reportType":    "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL",
+        "marketplaceIds": [market_id],
+        "dataStartTime":  start_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "dataEndTime":    end_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }).encode()
 
     req = urllib.request.Request(
@@ -400,27 +406,39 @@ def get_global_sales(days=90):
             print(f"  {market_name}: No refresh token, skipping.")
             continue
 
-        print(f"  {market_name}: Requesting orders report...")
+        print(f"  {market_name}: Requesting orders reports (3 x 30d)...")
         try:
             access_token = sp_get_access_token(marketplace["refresh_token"])
-            report_id    = sp_request_report(marketplace, access_token, days=days)
-            print(f"  {market_name}: Report ID {report_id}. Waiting for completion...")
 
-            document_id  = sp_poll_report(marketplace, access_token, report_id, max_wait=300)
-            print(f"  {market_name}: Downloading report...")
+            # Reports API max 30 days — fetch 3 periods for 90d coverage
+            periods = [
+                (now - timedelta(days=90), now - timedelta(days=61)),
+                (now - timedelta(days=60), now - timedelta(days=31)),
+                (now - timedelta(days=30), now),
+            ]
 
-            content      = sp_download_report(marketplace, access_token, document_id)
-            print(f"    {market_name}: Downloaded {len(content)} chars. Preview: {repr(content[:300])}")
-            sales_raw, unmapped = parse_orders_report(content, sku_map, cutoffs, market_name)
+            for start_dt, end_dt in periods:
+                period_label = f"{start_dt.strftime('%d%b')}-{end_dt.strftime('%d%b')}"
+                try:
+                    report_id   = sp_request_report(marketplace, access_token,
+                                                    start_dt=start_dt, end_dt=end_dt)
+                    print(f"  {market_name}: Report {period_label} → ID {report_id}. Waiting...")
+                    document_id = sp_poll_report(marketplace, access_token, report_id, max_wait=300)
+                    content     = sp_download_report(marketplace, access_token, document_id)
+                    print(f"    {market_name}: Downloaded {len(content)} chars.")
+                    sales_raw, unmapped = parse_orders_report(content, sku_map, cutoffs, market_name)
 
-            # Merge into all_sales_raw
-            for master_sku, entries in sales_raw.items():
-                if master_sku not in all_sales_raw:
-                    all_sales_raw[master_sku] = []
-                all_sales_raw[master_sku].extend(entries)
+                    for master_sku, entries in sales_raw.items():
+                        if master_sku not in all_sales_raw:
+                            all_sales_raw[master_sku] = []
+                        all_sales_raw[master_sku].extend(entries)
+                    all_unmapped.update(unmapped)
+                    time.sleep(2)
+                except Exception as e:
+                    print(f"  {market_name} {period_label}: Error — {e}. Skipping period.")
+                    continue
 
-            all_unmapped.update(unmapped)
-            print(f"  {market_name}: Done. {len(sales_raw)} master SKUs with sales.")
+            print(f"  {market_name}: Done.")
 
         except Exception as e:
             print(f"  {market_name}: Error — {e}. Skipping.")
@@ -768,19 +786,19 @@ def calc_metrics(current_stock, net_sales):
     suggested_order = max(0, round((TARGET_DAYS - (days_remaining or 0)) * velocity)) if velocity > 0 else 0
 
     # Status hierarchy:
-    # Dead Stock   → velocity < 0.1 AND stock > 0 (overrides all)
     # Out of Stock → stock = 0
+    # Dead Stock   → stock > 0 AND velocity < threshold (overrides all other statuses)
     # Critical     → days ≤ 7
     # Low          → days ≤ 15
     # Watch        → days ≤ 30
     # Healthy      → 30 < days ≤ 365
     # Overstock    → days > 365
 
-    DEAD_VELOCITY_THRESHOLD = 0.1
+    DEAD_VELOCITY_THRESHOLD = 0.075  # 0.075/day = ~2 units/month
 
     if current_stock <= 0:
         status = "OUT_OF_STOCK"
-    elif velocity < DEAD_VELOCITY_THRESHOLD:
+    elif current_stock > 0 and velocity < DEAD_VELOCITY_THRESHOLD:
         status = "DEAD_STOCK"
     elif days_remaining is None:
         status = "HEALTHY"
@@ -1189,7 +1207,7 @@ def send_email(data):
   {'<div style="margin-bottom:32px"><div style="font-size:14px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#e05c5c;margin-bottom:12px">🔴 Urgent — Order Immediately</div>' + make_table(product_rows(urgent)) + '</div>' if urgent else ''}
   {'<div style="margin-bottom:32px"><div style="font-size:14px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#f0a500;margin-bottom:12px">🟡 Low & Watch — Plan Orders</div>' + make_table(product_rows(low)) + '</div>' if low else ''}
   {'<div style="margin-bottom:32px"><div style="font-size:14px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#5ca0ff;margin-bottom:12px">🔷 Overstock — More Than 365 Days</div><table style="width:100%;border-collapse:collapse;font-size:13px;background:#111118;border-radius:10px;overflow:hidden"><thead><tr style="background:#1a1a26;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#5a5a7a"><th style="padding:10px 14px;text-align:left">SKU</th><th style="padding:10px 14px;text-align:left">Product</th><th style="padding:10px 14px;text-align:right">Stock</th><th style="padding:10px 14px;text-align:right">Days Left</th><th style="padding:10px 14px;text-align:right">Vel/d</th><th style="padding:10px 14px;text-align:right">Stock Value</th></tr></thead><tbody>' + "".join(f'<tr style="border-bottom:1px solid #1e1e2e"><td style="padding:10px 14px;font-family:monospace;font-size:12px;color:#5ca0ff">{p["sku"]}</td><td style="padding:10px 14px">{p["name"][:40]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">{p["currentStock"]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace;color:#5ca0ff">{round(p["daysRemaining"]) if p["daysRemaining"] else "∞"}d</td><td style="padding:10px 14px;text-align:right;font-family:monospace">{p["dailyVelocity"]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">₹{p.get("stockValue",0):,}</td></tr>' for p in over[:30]) + '</tbody></table></div>' if over else ''}
-  {'<div style="margin-bottom:32px"><div style="font-size:14px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#5a5a7a;margin-bottom:12px">💀 Dead Stock — Velocity &lt; 0.1/day</div><table style="width:100%;border-collapse:collapse;font-size:13px;background:#111118;border-radius:10px;overflow:hidden"><thead><tr style="background:#1a1a26;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#5a5a7a"><th style="padding:10px 14px;text-align:left">SKU</th><th style="padding:10px 14px;text-align:left">Product</th><th style="padding:10px 14px;text-align:right">Stock</th><th style="padding:10px 14px;text-align:right">Vel/d</th><th style="padding:10px 14px;text-align:right">Stock Value</th></tr></thead><tbody>' + "".join(f'<tr style="border-bottom:1px solid #1e1e2e;opacity:0.7"><td style="padding:10px 14px;font-family:monospace;font-size:12px;color:#5a5a7a">{p["sku"]}</td><td style="padding:10px 14px">{p["name"][:40]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">{p["currentStock"]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">{p["dailyVelocity"]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">₹{p.get("stockValue",0):,}</td></tr>' for p in dead[:30]) + '</tbody></table></div>' if dead else ''}
+  {'<div style="margin-bottom:32px"><div style="font-size:14px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#5a5a7a;margin-bottom:12px">💀 Dead Stock — Velocity &lt; 0.075/day</div><table style="width:100%;border-collapse:collapse;font-size:13px;background:#111118;border-radius:10px;overflow:hidden"><thead><tr style="background:#1a1a26;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#5a5a7a"><th style="padding:10px 14px;text-align:left">SKU</th><th style="padding:10px 14px;text-align:left">Product</th><th style="padding:10px 14px;text-align:right">Stock</th><th style="padding:10px 14px;text-align:right">Vel/d</th><th style="padding:10px 14px;text-align:right">Stock Value</th></tr></thead><tbody>' + "".join(f'<tr style="border-bottom:1px solid #1e1e2e;opacity:0.7"><td style="padding:10px 14px;font-family:monospace;font-size:12px;color:#5a5a7a">{p["sku"]}</td><td style="padding:10px 14px">{p["name"][:40]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">{p["currentStock"]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">{p["dailyVelocity"]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">₹{p.get("stockValue",0):,}</td></tr>' for p in dead[:30]) + '</tbody></table></div>' if dead else ''}
   <div style="font-size:12px;color:#333;margin-top:32px;border-top:1px solid #1a1a2a;padding-top:16px">
     Generated by Weavers Villa Stock Intelligence · {summary["total"]} SKUs · <a href="https://weavers-stock.vercel.app" style="color:#f0a500">weavers-stock.vercel.app</a>
   </div>
