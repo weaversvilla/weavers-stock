@@ -321,7 +321,9 @@ function App() {
   const filtered = useMemo(() => {
     if (!data) return [];
     let result = data.products.filter((p) => {
-      if (statusFilter !== "ALL" && p.status !== statusFilter) return false;
+      // Normalize: treat old isDeadStock=true as DEAD_STOCK status
+      const status = (p.isDeadStock && p.status !== "DEAD_STOCK") ? "DEAD_STOCK" : p.status;
+      if (statusFilter !== "ALL" && status !== statusFilter) return false;
       if (platformFilter !== "ALL") {
         const plat = platformFilter.toLowerCase();
         if ((p.platformSales?.[plat] || 0) === 0) return false;
@@ -482,40 +484,42 @@ function App() {
             </div>
             <div className={`stat-card dead ${statusFilter==="DEAD_STOCK" && !deadFilter ? "active-filter":""}`}
               onClick={() => { setStatusFilter("DEAD_STOCK"); setDeadFilter(false); }}>
-              <div className="stat-num">{data.summary.deadStock}</div>
+              <div className="stat-num">{data.summary.deadStock || data.products.filter(p => p.isDeadStock || p.status === "DEAD_STOCK").length}</div>
               <div className="stat-label">Dead Stock</div>
             </div>
           </div>
 
           {/* Inventory Value Bar */}
+          {(() => {
+            const total   = data.summary.totalStockValue || 0;
+            const healthy = data.summary.healthyStockValue || data.products.filter(p => p.status === "HEALTHY").reduce((s,p) => s + (p.stockValue||0), 0);
+            const over    = data.summary.overstockValue   || data.products.filter(p => p.status === "OVERSTOCK").reduce((s,p) => s + (p.stockValue||0), 0);
+            const dead    = data.summary.deadStockValue   || data.products.filter(p => p.isDeadStock || p.status === "DEAD_STOCK").reduce((s,p) => s + (p.stockValue||0), 0);
+            return (
           <div className="seasonal-bar" style={{marginBottom:20,gap:0,justifyContent:"flex-start"}}>
             <span className="seasonal-label" style={{marginRight:20}}>📦 Total Inventory Value</span>
             <div style={{display:"flex",alignItems:"baseline",gap:6,marginRight:28}}>
-              <span style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"var(--accent)"}}>₹{(data.summary.totalStockValue||0).toLocaleString("en-IN")}</span>
+              <span style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"var(--accent)"}}>₹{total.toLocaleString("en-IN")}</span>
               <span style={{fontSize:11,color:"var(--text3)",letterSpacing:1,textTransform:"uppercase"}}>Total</span>
             </div>
             <div style={{display:"flex",alignItems:"baseline",gap:6,marginRight:28}}>
-              <span style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"var(--accent3)"}}>₹{(data.summary.healthyStockValue||0).toLocaleString("en-IN")}</span>
-              <span style={{fontSize:11,fontWeight:700,color:"var(--accent3)"}}>
-                {data.summary.totalStockValue ? Math.round(100*(data.summary.healthyStockValue||0)/data.summary.totalStockValue) : 0}%
-              </span>
+              <span style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"var(--accent3)"}}>₹{healthy.toLocaleString("en-IN")}</span>
+              <span style={{fontSize:11,fontWeight:700,color:"var(--accent3)"}}>{total ? Math.round(100*healthy/total) : 0}%</span>
               <span style={{fontSize:11,color:"var(--text3)",letterSpacing:1,textTransform:"uppercase"}}>Healthy</span>
             </div>
             <div style={{display:"flex",alignItems:"baseline",gap:6,marginRight:28}}>
-              <span style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"#5ca0ff"}}>₹{(data.summary.overstockValue||0).toLocaleString("en-IN")}</span>
-              <span style={{fontSize:11,fontWeight:700,color:"#5ca0ff"}}>
-                {data.summary.totalStockValue ? Math.round(100*(data.summary.overstockValue||0)/data.summary.totalStockValue) : 0}%
-              </span>
+              <span style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"#5ca0ff"}}>₹{over.toLocaleString("en-IN")}</span>
+              <span style={{fontSize:11,fontWeight:700,color:"#5ca0ff"}}>{total ? Math.round(100*over/total) : 0}%</span>
               <span style={{fontSize:11,color:"var(--text3)",letterSpacing:1,textTransform:"uppercase"}}>Overstock</span>
             </div>
             <div style={{display:"flex",alignItems:"baseline",gap:6}}>
-              <span style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"var(--accent2)"}}>₹{(data.summary.deadStockValue||0).toLocaleString("en-IN")}</span>
-              <span style={{fontSize:11,fontWeight:700,color:"var(--accent2)"}}>
-                {data.summary.totalStockValue ? Math.round(100*(data.summary.deadStockValue||0)/data.summary.totalStockValue) : 0}%
-              </span>
+              <span style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"var(--accent2)"}}>₹{dead.toLocaleString("en-IN")}</span>
+              <span style={{fontSize:11,fontWeight:700,color:"var(--accent2)"}}>{total ? Math.round(100*dead/total) : 0}%</span>
               <span style={{fontSize:11,color:"var(--text3)",letterSpacing:1,textTransform:"uppercase"}}>Dead Stock</span>
             </div>
           </div>
+            );
+          })()}
 
           {/* Seasonal multiplier */}
           <div className="seasonal-bar">
@@ -601,16 +605,17 @@ function App() {
                   <tr><td colSpan={14} className="empty">No products match the current filters</td></tr>
                 )}
                 {filtered.map(p => {
+                  const status = (p.isDeadStock && p.status !== "DEAD_STOCK") ? "DEAD_STOCK" : p.status;
                   const adjOrder = Math.ceil((p.suggestedOrder || 0) * seasonalMult);
-                  const orderClass = p.status === "OUT_OF_STOCK" || p.status === "CRITICAL" ? "urgent"
-                    : p.status === "LOW" ? "soon"
-                    : p.status === "WATCH" ? "planned"
+                  const orderClass = status === "OUT_OF_STOCK" || status === "CRITICAL" ? "urgent"
+                    : status === "LOW" ? "soon"
+                    : status === "WATCH" ? "planned"
                     : "zero";
 
                   return (
-                    <tr key={p.productId} className={p.isDeadStock ? "dead-stock" : ""}>
+                    <tr key={p.productId} className={status === "DEAD_STOCK" ? "dead-stock" : ""}>
                       <td>
-                        <span className={`badge ${p.status}`}><span className="badge-dot"/>&nbsp;{STATUS_LABELS[p.status] || p.status}</span>
+                        <span className={`badge ${status}`}><span className="badge-dot"/>&nbsp;{STATUS_LABELS[status] || status}</span>
                       </td>
                       <td><span className="sku">{p.sku}</span></td>
                       <td className="name-cell">

@@ -10,8 +10,9 @@ jobs:
   run-report:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Skip if triggered by the Stock Bot's own commits
-    if: github.actor != 'github-actions[bot]' && github.actor != 'Stock Bot'
+    # Only skip if this is a push triggered by Stock Bot commit (prevents infinite loop)
+    # Allow: schedule, workflow_dispatch, and any non-bot push
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.actor != 'github-actions[bot]')
 
     steps:
       - name: Checkout repository
@@ -27,6 +28,11 @@ jobs:
           BL_TOKEN: ${{ secrets.BL_TOKEN }}
           GH_PAT: ${{ secrets.GH_PAT }}
           GMAIL_APP_PASS: ${{ secrets.GMAIL_APP_PASS }}
+          SP_CLIENT_ID: ${{ secrets.SP_CLIENT_ID }}
+          SP_CLIENT_SECRET: ${{ secrets.SP_CLIENT_SECRET }}
+          SP_REFRESH_US: ${{ secrets.SP_REFRESH_US }}
+          SP_REFRESH_UK: ${{ secrets.SP_REFRESH_UK }}
+          SP_REFRESH_UAE: ${{ secrets.SP_REFRESH_UAE }}
         run: python python/daily_report.py
 
       - name: Commit velocity snapshot
