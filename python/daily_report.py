@@ -298,30 +298,33 @@ def sp_download_report(marketplace, access_token, document_id):
     return content.decode("utf-8", errors="replace")
 
 def parse_orders_report(content, sku_map, cutoffs, market_name):
-    """
-    Parse flat file TSV report.
-    Returns: (sales_raw dict, unmapped set)
-    """
+    """Parse flat file TSV report."""
     sales_raw = {}
     unmapped  = set()
     lines     = content.strip().split("\n")
 
     if len(lines) < 2:
+        print(f"    {market_name}: Report has {len(lines)} lines — too short")
         return sales_raw, unmapped
 
     headers = lines[0].split("\t")
+    print(f"    {market_name}: Report has {len(lines)-1} rows. Headers: {headers[:8]}")
+    print(f"    {market_name}: First line raw: {repr(lines[0][:200])}")
+    if len(lines) > 1:
+        print(f"    {market_name}: Second line raw: {repr(lines[1][:200])}")
 
-    # Find column indices
-    def col(name):
-        for i, h in enumerate(headers):
-            if name.lower() in h.lower():
-                return i
+    # Find column indices — try multiple possible names
+    def col(*names):
+        for name in names:
+            for i, h in enumerate(headers):
+                if h.strip().lower() == name.lower():
+                    return i
         return None
 
-    sku_col    = col("sku") or col("seller-sku")
-    date_col   = col("purchase-date") or col("purchase_date")
-    qty_col    = col("quantity") or col("quantity-purchased")
-    status_col = col("order-status") or col("order_status")
+    sku_col    = col("seller-sku", "sku", "seller_sku", "msku")
+    date_col   = col("purchase-date", "purchase_date", "order-date", "order_date")
+    qty_col    = col("quantity", "quantity-purchased", "units-ordered", "quantity_purchased")
+    status_col = col("order-status", "order_status", "status")
 
     if sku_col is None or date_col is None or qty_col is None:
         print(f"    ⚠️ Could not find required columns. Headers: {headers[:10]}")
@@ -407,6 +410,7 @@ def get_global_sales(days=90):
             print(f"  {market_name}: Downloading report...")
 
             content      = sp_download_report(marketplace, access_token, document_id)
+            print(f"    {market_name}: Downloaded {len(content)} chars. Preview: {repr(content[:300])}")
             sales_raw, unmapped = parse_orders_report(content, sku_map, cutoffs, market_name)
 
             # Merge into all_sales_raw
@@ -1051,16 +1055,19 @@ def save_snapshot(products):
 
 def save_value_history(summary):
     """Save daily total/healthy/dead stock values for trend graph."""
-    today      = datetime.now().strftime("%Y-%m-%d")
-    file_exists = VALUE_HISTORY_CSV.exists()
+    today       = datetime.now().strftime("%Y-%m-%d")
+    file_exists = VALUE_HISTORY_CSV.exists() and VALUE_HISTORY_CSV.stat().st_size > 0
 
-    # Check if today already logged (avoid duplicates if run twice)
+    # Check if today already logged
     if file_exists:
-        with open(VALUE_HISTORY_CSV, "r", encoding="utf-8") as f:
-            last_line = f.readlines()[-1] if f.readlines() else ""
-        if last_line.startswith(today):
-            print(f"  Value history already logged for {today}, skipping.")
-            return
+        try:
+            with open(VALUE_HISTORY_CSV, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            if lines and lines[-1].startswith(today):
+                print(f"  Value history already logged for {today}, skipping.")
+                return
+        except:
+            pass
 
     with open(VALUE_HISTORY_CSV, "a", newline="", encoding="utf-8") as f:
         fieldnames = ["date","totalStockValue","healthyStockValue","deadStockValue",
@@ -1093,11 +1100,13 @@ def send_email(data):
 
     STATUS_COLOR = {
         "OUT_OF_STOCK": "#e05c5c", "CRITICAL": "#f07830",
-        "LOW": "#f0a500", "WATCH": "#a0a0ff", "HEALTHY": "#5ce0a0"
+        "LOW": "#f0a500", "WATCH": "#a0a0ff", "HEALTHY": "#5ce0a0",
+        "OVERSTOCK": "#5ca0ff", "DEAD_STOCK": "#5a5a7a"
     }
     STATUS_EMOJI = {
         "OUT_OF_STOCK": "🔴", "CRITICAL": "🟠",
-        "LOW": "🟡", "WATCH": "🔵", "HEALTHY": "🟢"
+        "LOW": "🟡", "WATCH": "🔵", "HEALTHY": "🟢",
+        "OVERSTOCK": "🔷", "DEAD_STOCK": "💀"
     }
 
     def platform_cell(p):
@@ -1168,16 +1177,19 @@ def send_email(data):
   <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:32px">
     {"".join(f'<div style="background:#111118;border:1px solid #2a2a3a;border-radius:10px;padding:16px 20px;min-width:110px"><div style="font-size:32px;font-weight:800;color:{c}">{v}</div><div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:4px">{l}</div></div>'
     for c,v,l in [
-        ("#e05c5c", summary["outOfStock"],  "Out of Stock"),
-        ("#f07830", summary["critical"],    "Critical <7d"),
-        ("#f0a500", summary["low"],         "Low <15d"),
-        ("#5ce0a0", summary["healthy"],     "Healthy"),
-        ("#5a5a7a", summary["deadStock"],   "Dead Stock"),
+        ("#e05c5c", summary["outOfStock"],       "Out of Stock"),
+        ("#f07830", summary["critical"],         "Critical <7d"),
+        ("#f0a500", summary["low"],              "Low <15d"),
+        ("#a0a0ff", summary.get("watch",0),      "Watch <30d"),
+        ("#5ce0a0", summary["healthy"],          "Healthy"),
+        ("#5ca0ff", summary.get("overstock",0),  "Overstock >365d"),
+        ("#5a5a7a", summary["deadStock"],        "Dead Stock"),
     ])}
   </div>
   {'<div style="margin-bottom:32px"><div style="font-size:14px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#e05c5c;margin-bottom:12px">🔴 Urgent — Order Immediately</div>' + make_table(product_rows(urgent)) + '</div>' if urgent else ''}
   {'<div style="margin-bottom:32px"><div style="font-size:14px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#f0a500;margin-bottom:12px">🟡 Low & Watch — Plan Orders</div>' + make_table(product_rows(low)) + '</div>' if low else ''}
-  {'<div style="margin-bottom:32px"><div style="font-size:14px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#5a5a7a;margin-bottom:12px">💀 Dead Stock — Zero Sales 30d</div><table style="width:100%;border-collapse:collapse;font-size:13px;background:#111118;border-radius:10px;overflow:hidden"><thead><tr style="background:#1a1a26;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#5a5a7a"><th style="padding:10px 14px;text-align:left">SKU</th><th style="padding:10px 14px;text-align:left">Product</th><th style="padding:10px 14px;text-align:right">Stock</th></tr></thead><tbody>' + "".join(f'<tr style="border-bottom:1px solid #1e1e2e;opacity:0.6"><td style="padding:10px 14px;font-family:monospace;font-size:12px;color:#5a5a7a">{p["sku"]}</td><td style="padding:10px 14px">{p["name"][:40]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">{p["currentStock"]}</td></tr>' for p in dead[:30]) + '</tbody></table></div>' if dead else ''}
+  {'<div style="margin-bottom:32px"><div style="font-size:14px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#5ca0ff;margin-bottom:12px">🔷 Overstock — More Than 365 Days</div><table style="width:100%;border-collapse:collapse;font-size:13px;background:#111118;border-radius:10px;overflow:hidden"><thead><tr style="background:#1a1a26;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#5a5a7a"><th style="padding:10px 14px;text-align:left">SKU</th><th style="padding:10px 14px;text-align:left">Product</th><th style="padding:10px 14px;text-align:right">Stock</th><th style="padding:10px 14px;text-align:right">Days Left</th><th style="padding:10px 14px;text-align:right">Vel/d</th><th style="padding:10px 14px;text-align:right">Stock Value</th></tr></thead><tbody>' + "".join(f'<tr style="border-bottom:1px solid #1e1e2e"><td style="padding:10px 14px;font-family:monospace;font-size:12px;color:#5ca0ff">{p["sku"]}</td><td style="padding:10px 14px">{p["name"][:40]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">{p["currentStock"]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace;color:#5ca0ff">{round(p["daysRemaining"]) if p["daysRemaining"] else "∞"}d</td><td style="padding:10px 14px;text-align:right;font-family:monospace">{p["dailyVelocity"]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">₹{p.get("stockValue",0):,}</td></tr>' for p in over[:30]) + '</tbody></table></div>' if over else ''}
+  {'<div style="margin-bottom:32px"><div style="font-size:14px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#5a5a7a;margin-bottom:12px">💀 Dead Stock — Velocity &lt; 0.1/day</div><table style="width:100%;border-collapse:collapse;font-size:13px;background:#111118;border-radius:10px;overflow:hidden"><thead><tr style="background:#1a1a26;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#5a5a7a"><th style="padding:10px 14px;text-align:left">SKU</th><th style="padding:10px 14px;text-align:left">Product</th><th style="padding:10px 14px;text-align:right">Stock</th><th style="padding:10px 14px;text-align:right">Vel/d</th><th style="padding:10px 14px;text-align:right">Stock Value</th></tr></thead><tbody>' + "".join(f'<tr style="border-bottom:1px solid #1e1e2e;opacity:0.7"><td style="padding:10px 14px;font-family:monospace;font-size:12px;color:#5a5a7a">{p["sku"]}</td><td style="padding:10px 14px">{p["name"][:40]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">{p["currentStock"]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">{p["dailyVelocity"]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">₹{p.get("stockValue",0):,}</td></tr>' for p in dead[:30]) + '</tbody></table></div>' if dead else ''}
   <div style="font-size:12px;color:#333;margin-top:32px;border-top:1px solid #1a1a2a;padding-top:16px">
     Generated by Weavers Villa Stock Intelligence · {summary["total"]} SKUs · <a href="https://weavers-stock.vercel.app" style="color:#f0a500">weavers-stock.vercel.app</a>
   </div>

@@ -362,17 +362,27 @@ function App() {
 
   const exportCSV = () => {
     if (!data) return;
-    const headers = ["SKU","Name","Stock","Status","Days Left","Velocity/day","7d Sales","15d Sales","30d Sales","90d Sales","Returns 30d","Amazon 30d","Flipkart 30d","Myntra 30d","In-Transit Returns","Suggested Order","Dead Stock"];
-    const rows = filtered.map(p => [
-      p.sku, `"${p.name}"`, p.currentStock, p.status,
-      p.daysRemaining ?? "∞", p.dailyVelocity,
-      p.netSales?.d7, p.netSales?.d15, p.netSales?.d30, p.netSales?.d90,
-      p.returns?.d30 || 0,
-      p.platformSales?.amazon || 0, p.platformSales?.flipkart || 0, p.platformSales?.myntra || 0,
-      p.inTransitReturns || 0,
-      Math.ceil((p.suggestedOrder || 0) * seasonalMult),
-      p.isDeadStock ? "YES" : "NO"
-    ]);
+    const totalVal = data.summary.totalStockValue || 1;
+    const headers = ["SKU","Name","Stock","Status","Days Left","Velocity/day","7d Sales","15d Sales","30d Sales","90d Sales","Returns 30d","Stock Value","% of Total","Amazon 30d","Amazon Vendor 30d","Flipkart 30d","Myntra 30d","Ajio 30d","Global 30d","Others 30d","Suggested Order"];
+    const rows = filtered.map(p => {
+      const status = (p.isDeadStock && p.status !== "DEAD_STOCK") ? "DEAD_STOCK" : p.status;
+      return [
+        p.sku, `"${(p.name||"").replace(/"/g,'""')}"`, p.currentStock, status,
+        p.daysRemaining ?? "∞", p.dailyVelocity,
+        p.netSales?.d7 ?? 0, p.netSales?.d15 ?? 0, p.netSales?.d30 ?? 0, p.netSales?.d90 ?? 0,
+        p.returns?.d30 || 0,
+        p.stockValue || 0,
+        totalVal > 0 ? (Math.round(1000*(p.stockValue||0)/totalVal)/10)+"%" : "0%",
+        p.platformSales?.amazon || 0,
+        p.platformSales?.amazon_vendor || 0,
+        p.platformSales?.flipkart || 0,
+        p.platformSales?.myntra || 0,
+        p.platformSales?.ajio || 0,
+        p.platformSales?.global || 0,
+        p.platformSales?.others || 0,
+        Math.ceil((p.suggestedOrder || 0) * seasonalMult),
+      ];
+    });
     const csv = [headers, ...rows].map(r => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
