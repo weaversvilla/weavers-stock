@@ -1,11 +1,12 @@
-// Vercel Edge Middleware — no Next.js required
-// Works with plain static sites on Vercel
+import { next } from "@vercel/edge";
 
-const USERNAME      = "weavers.villa@gmail.com";
-const PASSWORD      = "rad786rtt";  // ← Change this before pushing
+// ─── CONFIG ──────────────────────────────────────────────────────────────────
+const USERNAME      = "weavers";
+const PASSWORD      = "villa2026";  // ← Change this before pushing
 const COOKIE_NAME   = "wv_auth";
 const SESSION_TOKEN = "wv_stock_authenticated_2026";
 const MAX_AGE       = 3650 * 24 * 60 * 60; // 10 years in seconds
+// ─────────────────────────────────────────────────────────────────────────────
 
 const LOGIN_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -88,14 +89,14 @@ export default async function middleware(request) {
   // Check auth cookie
   const cookieHeader = request.headers.get("cookie") || "";
   const cookies = Object.fromEntries(
-    cookieHeader.split(";").map(c => {
-      const [k, ...v] = c.trim().split("=");
-      return [k, v.join("=")];
+    cookieHeader.split(";").filter(Boolean).map(c => {
+      const idx = c.indexOf("=");
+      return [c.slice(0, idx).trim(), c.slice(idx + 1).trim()];
     })
   );
 
   if (cookies[COOKIE_NAME] === SESSION_TOKEN) {
-    return; // Authenticated
+    return next(); // Authenticated — continue to the requested page
   }
 
   // Show login page
