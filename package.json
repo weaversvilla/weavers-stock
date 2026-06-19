@@ -4,7 +4,6 @@
   "description": "Weavers Villa Stock Intelligence Dashboard",
   "engines": { "node": "20.x" },
   "dependencies": {
-    "node-fetch": "^3.3.2",
-    "@vercel/edge": "^1.1.1"
+    "node-fetch": "^3.3.2"
   }
 }
