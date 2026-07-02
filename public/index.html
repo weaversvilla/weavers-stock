@@ -768,15 +768,6 @@ function App() {
                         </span>
                       </td>
                       <td>
-                        <button
-                          className="btn-eol"
-                          title="Mark as End of Life"
-                          onClick={() => toggleEol(p.sku)}
-                          disabled={eolSaving}>
-                          EOL
-                        </button>
-                      </td>
-                      <td>
                         {p.stockValue > 0 ? (
                           <div style={{lineHeight:1.3}}>
                             <div className="num" style={{fontSize:13}}>₹{(p.stockValue).toLocaleString("en-IN")}</div>
@@ -804,6 +795,15 @@ function App() {
                       </td>
                       <td><span className={p.returns?.d30 > 0 ? "num-danger" : "num"}>{p.returns?.d30 ?? 0}</span></td>
                       <td><span className="num">{p.dailyVelocity}</span></td>
+                      <td style={{textAlign:"right",paddingRight:16}}>
+                        <button
+                          className="btn-eol"
+                          title="Mark as End of Life — hide from main table"
+                          onClick={() => toggleEol(p.sku)}
+                          disabled={eolSaving}>
+                          EOL
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
