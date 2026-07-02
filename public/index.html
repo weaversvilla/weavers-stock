@@ -172,8 +172,16 @@ tbody tr.dead-stock{opacity:0.85}
 .order-qty.planned{background:rgba(92,224,160,0.08);color:var(--accent3);border:1px solid rgba(92,224,160,0.2)}
 .order-qty.zero{background:transparent;color:var(--text3)}
 
-/* Loading */
-.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:20px}
+/* EOL */
+.eol-block{margin-top:32px;border:1px solid #2a2a42;border-radius:var(--r2);overflow:hidden}
+.eol-header{background:var(--surface2);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+.eol-title{font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text3)}
+.eol-count{font-family:var(--mono);font-size:12px;color:var(--text3)}
+.btn-eol{padding:3px 10px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:0.5px;cursor:pointer;border:1px solid #3a3a5a;background:transparent;color:var(--text3);transition:all 0.15s;text-transform:uppercase}
+.btn-eol:hover{border-color:var(--accent2);color:var(--accent2)}
+.btn-eol.active{background:rgba(90,90,122,0.3);border-color:#5a5a7a;color:#8a8aaa}
+.badge.EOL{background:rgba(90,90,122,0.15);color:#5a5a7a}
+.badge.EOL .badge-dot{background:#5a5a7a}
 .spinner{width:48px;height:48px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .loading-text{color:var(--text2);font-family:var(--mono);font-size:13px}
@@ -254,6 +262,68 @@ const STATUS_LABELS = {
   DEAD_STOCK:   "Dead Stock",
 };
 
+function EolBlock({ products, toggleEol, eolSaving }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div className="eol-block">
+      <div className="eol-header" onClick={() => setOpen(o => !o)}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <span style={{fontSize:16}}>🚫</span>
+          <span className="eol-title">End of Life Products</span>
+          <span className="eol-count">{products.length} SKUs</span>
+        </div>
+        <span style={{color:"var(--text3)",fontSize:12}}>{open ? "▲ Collapse" : "▼ Expand"}</span>
+      </div>
+      {open && (
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+          <thead>
+            <tr style={{background:"var(--surface2)"}}>
+              <th style={{padding:"10px 16px",textAlign:"left",fontSize:11,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"var(--text3)"}}>SKU</th>
+              <th style={{padding:"10px 16px",textAlign:"left",fontSize:11,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"var(--text3)"}}>Product</th>
+              <th style={{padding:"10px 16px",textAlign:"left",fontSize:11,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"var(--text3)"}}>Stock</th>
+              <th style={{padding:"10px 16px",textAlign:"left",fontSize:11,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"var(--text3)"}}>Stock Value</th>
+              <th style={{padding:"10px 16px",textAlign:"left",fontSize:11,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"var(--text3)"}}>Vel/d</th>
+              <th style={{padding:"10px 16px",textAlign:"left",fontSize:11,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",color:"var(--text3)"}}>Platforms</th>
+              <th style={{padding:"10px 16px"}}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {products.map(p => (
+              <tr key={p.sku} style={{background:"var(--surface)",borderBottom:"1px solid var(--border)",opacity:0.7}}>
+                <td style={{padding:"11px 16px"}}><span style={{fontFamily:"var(--mono)",fontSize:12,color:"var(--text3)"}}>{p.sku}</span></td>
+                <td style={{padding:"11px 16px",color:"var(--text2)"}}>{p.name?.slice(0,40)}{p.name?.length > 40 ? "…" : ""}</td>
+                <td style={{padding:"11px 16px",fontFamily:"var(--mono)"}}>{p.currentStock}</td>
+                <td style={{padding:"11px 16px",fontFamily:"var(--mono)",color:"var(--text2)"}}>
+                  {p.stockValue > 0 ? `₹${p.stockValue.toLocaleString("en-IN")}` : "—"}
+                </td>
+                <td style={{padding:"11px 16px",fontFamily:"var(--mono)",color:"var(--text3)"}}>{p.dailyVelocity}</td>
+                <td style={{padding:"11px 16px"}}>
+                  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                    {p.platformSales?.amazon > 0 && <span className="platform-pill amazon">AM {p.platformSales.amazon}</span>}
+                    {p.platformSales?.flipkart > 0 && <span className="platform-pill flipkart">FL {p.platformSales.flipkart}</span>}
+                    {p.platformSales?.myntra > 0 && <span className="platform-pill myntra">MY {p.platformSales.myntra}</span>}
+                    {p.platformSales?.ajio > 0 && <span className="platform-pill ajio">AJ {p.platformSales.ajio}</span>}
+                    {p.platformSales?.global > 0 && <span className="platform-pill global">GL {p.platformSales.global}</span>}
+                  </div>
+                </td>
+                <td style={{padding:"11px 16px"}}>
+                  <button
+                    className="btn-eol active"
+                    title="Remove EOL flag"
+                    onClick={() => toggleEol(p.sku)}
+                    disabled={eolSaving}>
+                    ✕ Unmark
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 function App() {
   // Always use hardcoded URL — no setup screen needed
   const [apiBase] = useState(HARDCODED_URL);
@@ -264,6 +334,42 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [lastFetch, setLastFetch] = useState(null);
+  const [eolSkus, setEolSkus] = useState(new Set());
+  const [eolSaving, setEolSaving] = useState(false);
+
+  // Load EOL list from GitHub via /api/eol
+  const fetchEol = useCallback(async () => {
+    try {
+      const res = await fetch("/api/eol");
+      if (res.ok) {
+        const json = await res.json();
+        setEolSkus(new Set(json.skus || []));
+      }
+    } catch (e) {
+      console.warn("Could not load EOL list:", e.message);
+    }
+  }, []);
+
+  // Toggle EOL status for a SKU and save to GitHub
+  const toggleEol = useCallback(async (sku) => {
+    setEolSaving(true);
+    const updated = new Set(eolSkus);
+    if (updated.has(sku)) updated.delete(sku);
+    else updated.add(sku);
+    setEolSkus(updated);
+
+    try {
+      await fetch("/api/eol", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skus: Array.from(updated) }),
+      });
+    } catch (e) {
+      console.warn("Could not save EOL list:", e.message);
+    } finally {
+      setEolSaving(false);
+    }
+  }, [eolSkus]);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
@@ -315,12 +421,22 @@ function App() {
   }, [apiBase]);
 
   useEffect(() => {
-    if (setupDone && apiBase) fetchReport();
+    if (setupDone && apiBase) {
+      fetchReport();
+      fetchEol();
+    }
   }, [setupDone]);
+
+  const eolProducts = useMemo(() => {
+    if (!data) return [];
+    return data.products.filter(p => eolSkus.has(p.sku));
+  }, [data, eolSkus]);
 
   const filtered = useMemo(() => {
     if (!data) return [];
     let result = data.products.filter((p) => {
+      // Exclude EOL products from main table
+      if (eolSkus.has(p.sku)) return false;
       // Normalize: treat old isDeadStock=true as DEAD_STOCK status
       const status = (p.isDeadStock && p.status !== "DEAD_STOCK") ? "DEAD_STOCK" : p.status;
       if (statusFilter !== "ALL" && status !== statusFilter) return false;
@@ -598,6 +714,7 @@ function App() {
                     ["Platform 30d", null],
                     ["Returns 30d", "returns"],
                     ["Velocity/d", "velocity"],
+                    ["",           null],
                   ].map(([label, col]) => (
                     <th key={label}
                       className={col ? `sortable${sortCol===col ? " sorted":""}` : ""}
@@ -612,7 +729,7 @@ function App() {
               </thead>
               <tbody>
                 {filtered.length === 0 && (
-                  <tr><td colSpan={14} className="empty">No products match the current filters</td></tr>
+                  <tr><td colSpan={15} className="empty">No products match the current filters</td></tr>
                 )}
                 {filtered.map(p => {
                   const status = (p.isDeadStock && p.status !== "DEAD_STOCK") ? "DEAD_STOCK" : p.status;
@@ -651,6 +768,15 @@ function App() {
                         </span>
                       </td>
                       <td>
+                        <button
+                          className="btn-eol"
+                          title="Mark as End of Life"
+                          onClick={() => toggleEol(p.sku)}
+                          disabled={eolSaving}>
+                          EOL
+                        </button>
+                      </td>
+                      <td>
                         {p.stockValue > 0 ? (
                           <div style={{lineHeight:1.3}}>
                             <div className="num" style={{fontSize:13}}>₹{(p.stockValue).toLocaleString("en-IN")}</div>
@@ -685,6 +811,11 @@ function App() {
             </table>
           </div>
         </>
+      )}
+
+      {/* EOL Products Block */}
+      {!loading && data && eolProducts.length > 0 && (
+        <EolBlock products={eolProducts} toggleEol={toggleEol} eolSaving={eolSaving} />
       )}
 
       {!loading && !data && !error && (
