@@ -1072,10 +1072,10 @@ def save_snapshot(products):
     print(f"  Snapshot saved ({len(products)} rows).")
 
 def save_value_history(summary):
-    """Save daily total/healthy/dead stock values for trend graph."""
+    """Save daily total/healthy/dead/overstock values for trend graph."""
     today       = datetime.now().strftime("%Y-%m-%d")
     file_exists = VALUE_HISTORY_CSV.exists() and VALUE_HISTORY_CSV.stat().st_size > 0
-
+ 
     # Check if today already logged
     if file_exists:
         try:
@@ -1086,10 +1086,11 @@ def save_value_history(summary):
                 return
         except:
             pass
-
+ 
     with open(VALUE_HISTORY_CSV, "a", newline="", encoding="utf-8") as f:
         fieldnames = ["date","totalStockValue","healthyStockValue","deadStockValue",
-                      "totalSKUs","healthySKUs","deadSKUs","oosSKUs"]
+                      "overstockValue","totalSKUs","healthySKUs","deadSKUs",
+                      "overstockSKUs","oosSKUs"]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         if not file_exists:
             writer.writeheader()
@@ -1098,9 +1099,11 @@ def save_value_history(summary):
             "totalStockValue":  summary.get("totalStockValue", 0),
             "healthyStockValue":summary.get("healthyStockValue", 0),
             "deadStockValue":   summary.get("deadStockValue", 0),
+            "overstockValue":   summary.get("overstockValue", 0),
             "totalSKUs":        summary.get("total", 0),
             "healthySKUs":      summary.get("healthy", 0),
             "deadSKUs":         summary.get("deadStock", 0),
+            "overstockSKUs":    summary.get("overstock", 0),
             "oosSKUs":          summary.get("outOfStock", 0),
         })
     print(f"  Value history saved for {today}.")
