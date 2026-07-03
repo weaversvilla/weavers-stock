@@ -352,13 +352,11 @@ function App() {
 
   // Toggle EOL status for a SKU and save to GitHub
   const toggleEol = useCallback(async (sku) => {
-    console.log("toggleEol called for:", sku);
     setEolSaving(true);
     const updated = new Set(eolSkus);
     if (updated.has(sku)) updated.delete(sku);
     else updated.add(sku);
     setEolSkus(updated);
-    console.log("EOL set updated, now contains:", Array.from(updated));
 
     try {
       const res = await fetch("/api/eol", {
@@ -366,14 +364,12 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ skus: Array.from(updated) }),
       });
-      const json = await res.json().catch(() => null);
-      console.log("EOL save response:", res.status, json);
       if (!res.ok) {
-        alert(`Failed to save EOL flag: ${json?.error || res.status}`);
+        const json = await res.json().catch(() => null);
+        console.warn("Failed to save EOL flag:", json?.error || res.status);
       }
     } catch (e) {
-      console.error("Could not save EOL list:", e);
-      alert(`Error saving EOL flag: ${e.message}`);
+      console.warn("Could not save EOL list:", e.message);
     } finally {
       setEolSaving(false);
     }
@@ -482,7 +478,7 @@ function App() {
       });
     }
     return result;
-  }, [data, statusFilter, platformFilter, deadFilter, search, sortCol, sortDir]);
+  }, [data, statusFilter, platformFilter, deadFilter, search, sortCol, sortDir, eolSkus]);
 
   const exportCSV = () => {
     if (!data) return;
