@@ -324,6 +324,126 @@ function EolBlock({ products, toggleEol, eolSaving }) {
   );
 }
 
+function TrendChart() {
+  const [open, setOpen]       = React.useState(false);
+  const [rows, setRows]       = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [err, setErr]         = React.useState(null);
+
+  const load = React.useCallback(async () => {
+    if (rows) return; // already loaded
+    setLoading(true);
+    setErr(null);
+    try {
+      const res  = await fetch("/api/history");
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      setRows(json.rows || []);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [rows]);
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next) load();
+  };
+
+  // Build SVG line chart — no external chart library needed
+  const chart = React.useMemo(() => {
+    if (!rows || rows.length < 2) return null;
+
+    const W = 900, H = 260, PAD = 40;
+    const series = [
+      { key: "totalStockValue",   color: "#f0a500", label: "Total" },
+      { key: "healthyStockValue", color: "#5ce0a0", label: "Healthy" },
+      { key: "overstockValue",    color: "#5ca0ff", label: "Overstock" },
+      { key: "deadStockValue",    color: "#e05c5c", label: "Dead Stock" },
+    ];
+
+    const maxVal = Math.max(1, ...rows.flatMap(r => series.map(s => r[s.key] || 0)));
+    const xStep  = (W - PAD * 2) / (rows.length - 1);
+    const yScale = (v) => H - PAD - (v / maxVal) * (H - PAD * 2);
+    const xScale = (i) => PAD + i * xStep;
+
+    const paths = series.map(s => {
+      const d = rows.map((r, i) => `${i === 0 ? "M" : "L"} ${xScale(i).toFixed(1)} ${yScale(r[s.key] || 0).toFixed(1)}`).join(" ");
+      return { ...s, d };
+    });
+
+    // Show every Nth date label to avoid crowding
+    const labelEvery = Math.ceil(rows.length / 8);
+
+    return { W, H, PAD, paths, rows, xScale, yScale, labelEvery, maxVal };
+  }, [rows]);
+
+  return (
+    <div className="eol-block" style={{marginTop:16}}>
+      <div className="eol-header" onClick={toggle}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <span style={{fontSize:16}}>📈</span>
+          <span className="eol-title">Inventory Value Trend</span>
+          {rows && <span className="eol-count">{rows.length} days tracked</span>}
+        </div>
+        <span style={{color:"var(--text3)",fontSize:12}}>{open ? "▲ Collapse" : "▼ Expand"}</span>
+      </div>
+      {open && (
+        <div style={{padding:"20px"}}>
+          {loading && <div style={{color:"var(--text3)",fontSize:13}}>Loading history…</div>}
+          {err && <div style={{color:"var(--accent2)",fontSize:13}}>⚠ {err}</div>}
+          {rows && rows.length < 2 && (
+            <div style={{color:"var(--text3)",fontSize:13}}>
+              Not enough history yet — need at least 2 days of data. Currently have {rows.length}.
+            </div>
+          )}
+          {chart && (
+            <>
+              <div style={{display:"flex",gap:20,marginBottom:16,flexWrap:"wrap"}}>
+                {chart.paths.map(s => (
+                  <div key={s.key} style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"var(--text2)"}}>
+                    <span style={{width:12,height:3,background:s.color,display:"inline-block",borderRadius:2}}/>
+                    {s.label}
+                  </div>
+                ))}
+              </div>
+              <svg viewBox={`0 0 ${chart.W} ${chart.H}`} style={{width:"100%",height:"auto"}}>
+                {/* Horizontal gridlines */}
+                {[0,0.25,0.5,0.75,1].map(f => (
+                  <line key={f}
+                    x1={chart.PAD} x2={chart.W - chart.PAD}
+                    y1={chart.H - chart.PAD - f*(chart.H-chart.PAD*2)}
+                    y2={chart.H - chart.PAD - f*(chart.H-chart.PAD*2)}
+                    stroke="#2a2a42" strokeWidth="1"/>
+                ))}
+                {/* Lines */}
+                {chart.paths.map(s => (
+                  <path key={s.key} d={s.d} fill="none" stroke={s.color} strokeWidth="2.5"/>
+                ))}
+                {/* X-axis date labels */}
+                {chart.rows.map((r, i) => (
+                  i % chart.labelEvery === 0 ? (
+                    <text key={i} x={chart.xScale(i)} y={chart.H - 12}
+                      fontSize="10" fill="#5a5a7a" textAnchor="middle" fontFamily="JetBrains Mono, monospace">
+                      {r.date?.slice(5)}
+                    </text>
+                  ) : null
+                ))}
+                {/* Y-axis max label */}
+                <text x={chart.PAD} y={16} fontSize="10" fill="#5a5a7a" fontFamily="JetBrains Mono, monospace">
+                  ₹{chart.maxVal.toLocaleString("en-IN")}
+                </text>
+              </svg>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function App() {
   // Always use hardcoded URL — no setup screen needed
   const [apiBase] = useState(HARDCODED_URL);
@@ -434,6 +554,33 @@ function App() {
   const eolProducts = useMemo(() => {
     if (!data) return [];
     return data.products.filter(p => eolSkus.has(p.sku));
+  }, [data, eolSkus]);
+
+  // Recompute summary counts/values live, excluding EOL products,
+  // so cards and inventory bar always match what EOL flags currently hide.
+  const liveCounts = useMemo(() => {
+    if (!data) return null;
+    const nonEol = data.products.filter(p => !eolSkus.has(p.sku));
+    const statusOf = (p) => (p.isDeadStock && p.status !== "DEAD_STOCK") ? "DEAD_STOCK" : p.status;
+
+    const counts = {
+      outOfStock: 0, critical: 0, low: 0, watch: 0, healthy: 0, overstock: 0, deadStock: 0,
+      totalStockValue: 0, healthyStockValue: 0, overstockValue: 0, deadStockValue: 0,
+    };
+
+    for (const p of nonEol) {
+      const s = statusOf(p);
+      const val = p.stockValue || 0;
+      counts.totalStockValue += val;
+      if (s === "OUT_OF_STOCK") counts.outOfStock++;
+      else if (s === "CRITICAL") counts.critical++;
+      else if (s === "LOW") counts.low++;
+      else if (s === "WATCH") counts.watch++;
+      else if (s === "HEALTHY") { counts.healthy++; counts.healthyStockValue += val; }
+      else if (s === "OVERSTOCK") { counts.overstock++; counts.overstockValue += val; }
+      else if (s === "DEAD_STOCK") { counts.deadStock++; counts.deadStockValue += val; }
+    }
+    return counts;
   }, [data, eolSkus]);
 
   const filtered = useMemo(() => {
@@ -584,47 +731,47 @@ function App() {
           <div className="summary">
             <div className={`stat-card oos ${statusFilter==="OUT_OF_STOCK" && !deadFilter ? "active-filter":""}`}
               onClick={() => { setStatusFilter("OUT_OF_STOCK"); setDeadFilter(false); }}>
-              <div className="stat-num">{data.summary.outOfStock}</div>
+              <div className="stat-num">{liveCounts.outOfStock}</div>
               <div className="stat-label">Out of Stock</div>
             </div>
             <div className={`stat-card critical ${statusFilter==="CRITICAL" && !deadFilter ? "active-filter":""}`}
               onClick={() => { setStatusFilter("CRITICAL"); setDeadFilter(false); }}>
-              <div className="stat-num">{data.summary.critical}</div>
+              <div className="stat-num">{liveCounts.critical}</div>
               <div className="stat-label">Critical &lt;7d</div>
             </div>
             <div className={`stat-card low ${statusFilter==="LOW" && !deadFilter ? "active-filter":""}`}
               onClick={() => { setStatusFilter("LOW"); setDeadFilter(false); }}>
-              <div className="stat-num">{data.summary.low}</div>
+              <div className="stat-num">{liveCounts.low}</div>
               <div className="stat-label">Low &lt;15d</div>
             </div>
             <div className={`stat-card watch ${statusFilter==="WATCH" && !deadFilter ? "active-filter":""}`}
               onClick={() => { setStatusFilter("WATCH"); setDeadFilter(false); }}>
-              <div className="stat-num">{data.summary.watch}</div>
+              <div className="stat-num">{liveCounts.watch}</div>
               <div className="stat-label">Watch &lt;30d</div>
             </div>
             <div className={`stat-card healthy ${statusFilter==="HEALTHY" && !deadFilter ? "active-filter":""}`}
               onClick={() => { setStatusFilter("HEALTHY"); setDeadFilter(false); }}>
-              <div className="stat-num">{data.summary.healthy}</div>
+              <div className="stat-num">{liveCounts.healthy}</div>
               <div className="stat-label">Healthy</div>
             </div>
             <div className={`stat-card overstock ${statusFilter==="OVERSTOCK" && !deadFilter ? "active-filter":""}`}
               onClick={() => { setStatusFilter("OVERSTOCK"); setDeadFilter(false); }}>
-              <div className="stat-num">{data.summary.overstock||0}</div>
+              <div className="stat-num">{liveCounts.overstock}</div>
               <div className="stat-label">Overstock &gt;365d</div>
             </div>
             <div className={`stat-card dead ${statusFilter==="DEAD_STOCK" && !deadFilter ? "active-filter":""}`}
               onClick={() => { setStatusFilter("DEAD_STOCK"); setDeadFilter(false); }}>
-              <div className="stat-num">{data.summary.deadStock || data.products.filter(p => p.isDeadStock || p.status === "DEAD_STOCK").length}</div>
+              <div className="stat-num">{liveCounts.deadStock}</div>
               <div className="stat-label">Dead Stock</div>
             </div>
           </div>
 
           {/* Inventory Value Bar */}
           {(() => {
-            const total   = data.summary.totalStockValue || 0;
-            const healthy = data.summary.healthyStockValue || data.products.filter(p => p.status === "HEALTHY").reduce((s,p) => s + (p.stockValue||0), 0);
-            const over    = data.summary.overstockValue   || data.products.filter(p => p.status === "OVERSTOCK").reduce((s,p) => s + (p.stockValue||0), 0);
-            const dead    = data.summary.deadStockValue   || data.products.filter(p => p.isDeadStock || p.status === "DEAD_STOCK").reduce((s,p) => s + (p.stockValue||0), 0);
+            const total   = liveCounts.totalStockValue;
+            const healthy = liveCounts.healthyStockValue;
+            const over    = liveCounts.overstockValue;
+            const dead    = liveCounts.deadStockValue;
             return (
           <div className="seasonal-bar" style={{marginBottom:20,gap:0,justifyContent:"flex-start"}}>
             <span className="seasonal-label" style={{marginRight:20}}>📦 Total Inventory Value</span>
@@ -669,7 +816,8 @@ function App() {
           {/* Meta */}
           <div className="meta-bar">
             <span className="meta-text">Report generated: <span>{lastFetch?.toLocaleString("en-IN", {timeZone:"Asia/Kolkata", day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit"})}</span></span>
-            <span className="meta-text">Showing: <span>{filtered.length} / {data.products.length} SKUs</span></span>
+            <span className="meta-text">Showing: <span>{filtered.length} / {data.products.length - eolSkus.size} SKUs</span></span>
+            {eolSkus.size > 0 && <span className="meta-text">({eolSkus.size} EOL hidden)</span>}
             {seasonalMult !== 1 && <span className="meta-text" style={{color:"var(--accent)"}}>Seasonal {seasonalMult}× applied to order suggestions</span>}
           </div>
 
@@ -821,6 +969,9 @@ function App() {
       {!loading && data && eolProducts.length > 0 && (
         <EolBlock products={eolProducts} toggleEol={toggleEol} eolSaving={eolSaving} />
       )}
+
+      {/* Inventory Value Trend Chart */}
+      {!loading && data && <TrendChart/>}
 
       {!loading && !data && !error && (
         <div className="loading">
