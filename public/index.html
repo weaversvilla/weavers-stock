@@ -216,25 +216,27 @@ td.name-cell:hover .tooltip{display:block}
 
   /* Mobile table — show only essential columns */
   /* Show: Status, SKU, Stock, Days Left, Order Qty */
-  /* Hide: Product name, Velocity, 7d, 15d, 30d, 90d, Platform, Returns */
-  th:nth-child(3){display:none} /* Product */
-  td:nth-child(3){display:none}
-  th:nth-child(7){display:none} /* Stock Value */
-  td:nth-child(7){display:none}
-  th:nth-child(8){display:none} /* 7d */
+  /* Hide: Notes, Product name, Velocity, 7d, 15d, 30d, 90d, Platform, Returns */
+  th:nth-child(1){display:none} /* Notes */
+  td:nth-child(1){display:none}
+  th:nth-child(4){display:none} /* Product */
+  td:nth-child(4){display:none}
+  th:nth-child(8){display:none} /* Stock Value */
   td:nth-child(8){display:none}
-  th:nth-child(9){display:none} /* 15d */
+  th:nth-child(9){display:none} /* 7d */
   td:nth-child(9){display:none}
-  th:nth-child(10){display:none} /* 30d */
+  th:nth-child(10){display:none} /* 15d */
   td:nth-child(10){display:none}
-  th:nth-child(11){display:none} /* 90d */
+  th:nth-child(11){display:none} /* 30d */
   td:nth-child(11){display:none}
-  th:nth-child(12){display:none} /* Platform */
+  th:nth-child(12){display:none} /* 90d */
   td:nth-child(12){display:none}
-  th:nth-child(13){display:none} /* Returns */
+  th:nth-child(13){display:none} /* Platform */
   td:nth-child(13){display:none}
-  th:nth-child(14){display:none} /* Velocity */
+  th:nth-child(14){display:none} /* Returns */
   td:nth-child(14){display:none}
+  th:nth-child(15){display:none} /* Velocity */
+  td:nth-child(15){display:none}
 
   /* Make remaining columns fit */
   th,td{padding:10px 8px;font-size:12px}
@@ -261,6 +263,60 @@ const STATUS_LABELS = {
   OVERSTOCK:    "Overstock",
   DEAD_STOCK:   "Dead Stock",
 };
+
+function CommentCell({ sku, value, onChange, onSave, saving }) {
+  const [editing, setEditing] = React.useState(false);
+  const inputRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (editing && inputRef.current) inputRef.current.focus();
+  }, [editing]);
+
+  const commit = () => {
+    onSave(value);
+    setEditing(false);
+  };
+
+  if (!editing && !value) {
+    return (
+      <button className="btn-eol" style={{opacity:0.5}} onClick={() => setEditing(true)}>
+        + Note
+      </button>
+    );
+  }
+
+  if (!editing) {
+    return (
+      <div style={{display:"flex",alignItems:"center",gap:6,maxWidth:180}}>
+        <span
+          onClick={() => setEditing(true)}
+          style={{fontSize:12,color:"var(--text2)",cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:140}}
+          title={value}>
+          {value}
+        </span>
+        <span
+          onClick={() => onSave("")}
+          title="Delete comment"
+          style={{cursor:"pointer",color:"var(--accent2)",fontSize:12,flexShrink:0}}>
+          ✕
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <input
+      ref={inputRef}
+      className="input"
+      style={{fontFamily:"var(--font)",fontSize:12,padding:"6px 8px",width:160,minWidth:160}}
+      value={value}
+      placeholder="Add note..."
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditing(false); }}
+    />
+  );
+}
 
 function EolBlock({ products, toggleEol, eolSaving }) {
   const [open, setOpen] = React.useState(false);
@@ -456,6 +512,9 @@ function App() {
   const [lastFetch, setLastFetch] = useState(null);
   const [eolSkus, setEolSkus] = useState(new Set());
   const [eolSaving, setEolSaving] = useState(false);
+  const [comments, setComments] = useState({});
+  const [commentDraft, setCommentDraft] = useState({});
+  const [commentSaving, setCommentSaving] = useState(false);
 
   // Load EOL list from GitHub via /api/eol
   const fetchEol = useCallback(async () => {
@@ -494,6 +553,45 @@ function App() {
       setEolSaving(false);
     }
   }, [eolSkus]);
+
+  // Load comments from GitHub via /api/comments
+  const fetchComments = useCallback(async () => {
+    try {
+      const res = await fetch("/api/comments");
+      if (res.ok) {
+        const json = await res.json();
+        setComments(json.comments || {});
+      }
+    } catch (e) {
+      console.warn("Could not load comments:", e.message);
+    }
+  }, []);
+
+  // Save a single SKU's comment (empty string deletes it)
+  const saveComment = useCallback(async (sku, text) => {
+    setCommentSaving(true);
+    const updated = { ...comments };
+    const trimmed = (text || "").trim();
+    if (trimmed) updated[sku] = trimmed;
+    else delete updated[sku];
+    setComments(updated);
+
+    try {
+      const res = await fetch("/api/comments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comments: updated }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        console.warn("Failed to save comment:", json?.error || res.status);
+      }
+    } catch (e) {
+      console.warn("Could not save comment:", e.message);
+    } finally {
+      setCommentSaving(false);
+    }
+  }, [comments]);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
@@ -548,6 +646,7 @@ function App() {
     if (setupDone && apiBase) {
       fetchReport();
       fetchEol();
+      fetchComments();
     }
   }, [setupDone]);
 
@@ -852,6 +951,7 @@ function App() {
               <thead>
                 <tr>
                   {[
+                    ["Notes",      null],
                     ["Status",     null],
                     ["SKU",        "sku"],
                     ["Product",    "name"],
@@ -881,7 +981,7 @@ function App() {
               </thead>
               <tbody>
                 {filtered.length === 0 && (
-                  <tr><td colSpan={15} className="empty">No products match the current filters</td></tr>
+                  <tr><td colSpan={16} className="empty">No products match the current filters</td></tr>
                 )}
                 {filtered.map(p => {
                   const status = (p.isDeadStock && p.status !== "DEAD_STOCK") ? "DEAD_STOCK" : p.status;
@@ -893,6 +993,15 @@ function App() {
 
                   return (
                     <tr key={p.productId} className={status === "DEAD_STOCK" ? "dead-stock" : ""}>
+                      <td>
+                        <CommentCell
+                          sku={p.sku}
+                          value={commentDraft[p.sku] ?? comments[p.sku] ?? ""}
+                          onChange={(v) => setCommentDraft(d => ({ ...d, [p.sku]: v }))}
+                          onSave={(v) => saveComment(p.sku, v)}
+                          saving={commentSaving}
+                        />
+                      </td>
                       <td>
                         <span className={`badge ${status}`}><span className="badge-dot"/>&nbsp;{STATUS_LABELS[status] || status}</span>
                       </td>

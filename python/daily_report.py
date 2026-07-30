@@ -101,6 +101,25 @@ WEIGHTS = {"d7": 0.40, "d15": 0.30, "d30": 0.20, "d90": 0.10}
 BL_URL = "https://api.baselinker.com/connector.php"
 socket.setdefaulttimeout(60)
 
+def load_eol_skus():
+    """Read EOL-flagged SKUs written by the dashboard (data/eol_skus.json).
+    This file is committed to the repo by /api/eol.js whenever someone
+    marks/unmarks a product as EOL from the dashboard. Since GitHub Actions
+    checks out the full repo before running this script, the file is
+    already present locally — no API call needed."""
+    eol_file = Path(__file__).parent.parent / "data" / "eol_skus.json"
+    if not eol_file.exists():
+        return set()
+    try:
+        with open(eol_file, "r", encoding="utf-8") as f:
+            content = json.load(f)
+        skus = set(content.get("skus", []))
+        print(f"  Loaded {len(skus)} EOL-flagged SKUs (excluded from email).")
+        return skus
+    except Exception as e:
+        print(f"  Could not load EOL list: {e}")
+        return set()
+
 def bl_call(method, params={}):
     """Make a Baselinker API call with rate limit and timeout handling."""
     data = urllib.parse.urlencode({
@@ -1109,11 +1128,13 @@ def save_value_history(summary):
     print(f"  Value history saved for {today}.")
 
 # ── Send HTML email ───────────────────────────────────────────────────────────
-def send_email(data):
+def send_email(data, eol_skus=None):
+    eol_skus = eol_skus or set()
     summary  = data["summary"]
     products = data["products"]
     now      = datetime.now().strftime("%d %b %Y, %I:%M %p IST")
 
+    products = [p for p in products if p["sku"] not in eol_skus]
     urgent = sorted([p for p in products if p["status"] in ("OUT_OF_STOCK","CRITICAL")], key=lambda x: x["suggestedOrder"], reverse=True)
     low    = sorted([p for p in products if p["status"] in ("LOW","WATCH")], key=lambda x: x["suggestedOrder"], reverse=True)
     dead   = [p for p in products if p["status"] == "DEAD_STOCK"]
@@ -1198,13 +1219,13 @@ def send_email(data):
   <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:32px">
     {"".join(f'<div style="background:#111118;border:1px solid #2a2a3a;border-radius:10px;padding:16px 20px;min-width:110px"><div style="font-size:32px;font-weight:800;color:{c}">{v}</div><div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-top:4px">{l}</div></div>'
     for c,v,l in [
-        ("#e05c5c", summary["outOfStock"],       "Out of Stock"),
-        ("#f07830", summary["critical"],         "Critical <7d"),
-        ("#f0a500", summary["low"],              "Low <15d"),
-        ("#a0a0ff", summary.get("watch",0),      "Watch <30d"),
-        ("#5ce0a0", summary["healthy"],          "Healthy"),
-        ("#5ca0ff", summary.get("overstock",0),  "Overstock >365d"),
-        ("#5a5a7a", summary["deadStock"],        "Dead Stock"),
+        ("#e05c5c", sum(1 for p in products if p["status"]=="OUT_OF_STOCK"), "Out of Stock"),
+        ("#f07830", sum(1 for p in products if p["status"]=="CRITICAL"),     "Critical <7d"),
+        ("#f0a500", sum(1 for p in products if p["status"]=="LOW"),         "Low <15d"),
+        ("#a0a0ff", sum(1 for p in products if p["status"]=="WATCH"),       "Watch <30d"),
+        ("#5ce0a0", sum(1 for p in products if p["status"]=="HEALTHY"),     "Healthy"),
+        ("#5ca0ff", sum(1 for p in products if p["status"]=="OVERSTOCK"),   "Overstock >365d"),
+        ("#5a5a7a", len(dead),                                              "Dead Stock"),
     ])}
   </div>
   {'<div style="margin-bottom:32px"><div style="font-size:14px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#e05c5c;margin-bottom:12px">🔴 Urgent — Order Immediately</div>' + make_table(product_rows(urgent)) + '</div>' if urgent else ''}
@@ -1212,12 +1233,13 @@ def send_email(data):
   {'<div style="margin-bottom:32px"><div style="font-size:14px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#5ca0ff;margin-bottom:12px">🔷 Overstock — More Than 365 Days</div><table style="width:100%;border-collapse:collapse;font-size:13px;background:#111118;border-radius:10px;overflow:hidden"><thead><tr style="background:#1a1a26;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#5a5a7a"><th style="padding:10px 14px;text-align:left">SKU</th><th style="padding:10px 14px;text-align:left">Product</th><th style="padding:10px 14px;text-align:right">Stock</th><th style="padding:10px 14px;text-align:right">Days Left</th><th style="padding:10px 14px;text-align:right">Vel/d</th><th style="padding:10px 14px;text-align:right">Stock Value</th></tr></thead><tbody>' + "".join(f'<tr style="border-bottom:1px solid #1e1e2e"><td style="padding:10px 14px;font-family:monospace;font-size:12px;color:#5ca0ff">{p["sku"]}</td><td style="padding:10px 14px">{p["name"][:40]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">{p["currentStock"]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace;color:#5ca0ff">{round(p["daysRemaining"]) if p["daysRemaining"] else "∞"}d</td><td style="padding:10px 14px;text-align:right;font-family:monospace">{p["dailyVelocity"]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">₹{p.get("stockValue",0):,}</td></tr>' for p in over[:30]) + '</tbody></table></div>' if over else ''}
   {'<div style="margin-bottom:32px"><div style="font-size:14px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#5a5a7a;margin-bottom:12px">💀 Dead Stock — Velocity &lt; 0.075/day</div><table style="width:100%;border-collapse:collapse;font-size:13px;background:#111118;border-radius:10px;overflow:hidden"><thead><tr style="background:#1a1a26;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#5a5a7a"><th style="padding:10px 14px;text-align:left">SKU</th><th style="padding:10px 14px;text-align:left">Product</th><th style="padding:10px 14px;text-align:right">Stock</th><th style="padding:10px 14px;text-align:right">Vel/d</th><th style="padding:10px 14px;text-align:right">Stock Value</th></tr></thead><tbody>' + "".join(f'<tr style="border-bottom:1px solid #1e1e2e;opacity:0.7"><td style="padding:10px 14px;font-family:monospace;font-size:12px;color:#5a5a7a">{p["sku"]}</td><td style="padding:10px 14px">{p["name"][:40]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">{p["currentStock"]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">{p["dailyVelocity"]}</td><td style="padding:10px 14px;text-align:right;font-family:monospace">₹{p.get("stockValue",0):,}</td></tr>' for p in dead[:30]) + '</tbody></table></div>' if dead else ''}
   <div style="font-size:12px;color:#333;margin-top:32px;border-top:1px solid #1a1a2a;padding-top:16px">
-    Generated by Weavers Villa Stock Intelligence · {summary["total"]} SKUs · <a href="https://weavers-stock.vercel.app" style="color:#f0a500">weavers-stock.vercel.app</a>
+    Generated by Weavers Villa Stock Intelligence · {len(products)} SKUs · <a href="https://weavers-stock.vercel.app" style="color:#f0a500">weavers-stock.vercel.app</a>
   </div>
 </div></body></html>"""
 
-    urgent_count = summary["outOfStock"] + summary["critical"]
-    subject = f"🔴 {urgent_count} Urgent | 🟡 {summary['low']} Low | Weavers Stock {datetime.now().strftime('%d %b')}" if urgent_count else f"✅ Stock OK | 🟡 {summary['low']} Low | Weavers Stock {datetime.now().strftime('%d %b')}"
+    low_count    = sum(1 for p in products if p["status"]=="LOW")
+    urgent_count = len(urgent)
+    subject = f"🔴 {urgent_count} Urgent | 🟡 {low_count} Low | Weavers Stock {datetime.now().strftime('%d %b')}" if urgent_count else f"✅ Stock OK | 🟡 {low_count} Low | Weavers Stock {datetime.now().strftime('%d %b')}"
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -1248,7 +1270,8 @@ def main():
     upload_to_github(data)
 
     print("\nSending email...")
-    send_email(data)
+    eol_skus = load_eol_skus()
+    send_email(data, eol_skus)
 
     print(f"\n✅ Done! Dashboard: https://weavers-stock.vercel.app")
 
