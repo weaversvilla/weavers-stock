@@ -248,7 +248,7 @@ td.name-cell:hover .tooltip{display:block}
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useEffect, useCallback, useMemo } = React;
+const { useState, useEffect, useCallback, useMemo, useRef } = React;
 
 const API_BASE_KEY = "wv_api_base";
 const HARDCODED_URL = "https://weavers-stock.vercel.app";
@@ -515,6 +515,7 @@ function App() {
   const [comments, setComments] = useState({});
   const [commentDraft, setCommentDraft] = useState({});
   const [commentSaving, setCommentSaving] = useState(false);
+  const autoCleanedRef = useRef(false);
 
   // Load EOL list from GitHub via /api/eol
   const fetchEol = useCallback(async () => {
@@ -593,6 +594,38 @@ function App() {
     }
   }, [comments]);
 
+  // Auto-clear comments once a product's status moves to HEALTHY or OVERSTOCK.
+  // Dead Stock and everything else (OOS/Critical/Low/Watch) keep their notes.
+  // Runs once per fresh data+comments load (guarded by autoCleanedRef).
+  useEffect(() => {
+    if (!data || autoCleanedRef.current) return;
+    if (Object.keys(comments).length === 0) return; // nothing to clean, and avoids running before comments arrive
+
+    const statusOf = (p) => (p.isDeadStock && p.status !== "DEAD_STOCK") ? "DEAD_STOCK" : p.status;
+    const cleared  = { ...comments };
+    let changed    = false;
+
+    for (const p of data.products) {
+      if (!cleared[p.sku]) continue;
+      const s = statusOf(p);
+      if (s === "HEALTHY" || s === "OVERSTOCK") {
+        delete cleared[p.sku];
+        changed = true;
+      }
+    }
+
+    autoCleanedRef.current = true;
+
+    if (changed) {
+      setComments(cleared);
+      fetch("/api/comments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comments: cleared }),
+      }).catch((e) => console.warn("Could not auto-save cleaned comments:", e.message));
+    }
+  }, [data, comments]);
+
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [platformFilter, setPlatformFilter] = useState("ALL");
@@ -617,6 +650,7 @@ function App() {
   const fetchReport = useCallback(async () => {
     setLoading(true);
     setError(null);
+    autoCleanedRef.current = false; // re-check comment cleanup against fresh statuses
     try {
       // Fetch directly from GitHub raw URL — always fresh, bypasses Vercel CDN cache
       const res = await fetch(`${DATA_URL}?t=${Date.now()}`);
