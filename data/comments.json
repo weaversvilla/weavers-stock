@@ -5,7 +5,8 @@
     "DP-BUTY-WHITE": "order placed",
     "SH-401-BLACK": "order placed 150",
     "SH-401-WHITE": "order placed 100",
-    "SH-402-BLACK": "pending order 100"
+    "SH-402-BLACK": "pending order 100",
+    "SH-402-WHITE": "pending order 50"
   },
-  "updated_at": "2026-08-04T08:58:29.031Z"
+  "updated_at": "2026-08-04T08:58:42.219Z"
 }
