@@ -7,7 +7,8 @@
     "SH-401-WHITE": "order placed 100",
     "SH-402-BLACK": "pending order 100",
     "SH-402-WHITE": "pending order 50",
-    "SH-405-BEIGE": "pending order 200"
+    "SH-405-BEIGE": "pending order 200",
+    "SH-413-BLACK": "pending order 50"
   },
-  "updated_at": "2026-08-04T08:59:01.158Z"
+  "updated_at": "2026-08-04T08:59:13.214Z"
 }
