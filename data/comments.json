@@ -13,12 +13,10 @@
     "DP-701-BLACK": "order given 100",
     "DP-704-BEIGE": "order given 500",
     "DP-BUTY-ORANGE": "order given 50",
-    "SH-407-MAROON": "NA",
     "DP-718-BEIGE": "Order given 500",
     "DP-710-WHITE": "200 order given",
     "DP-718-BLACK": "200 order given",
     "DP-718-RED": "100 order given",
-    "DP-720-BLACK": "100 order given",
     "DP-720-PEACH": "100 order given",
     "DP-720-PISTA": "100 order given",
     "DP-720-SKYBLUE": "100 order given",
@@ -32,5 +30,5 @@
     "DP-724-TRICOLOUR": "100 order given",
     "SH-403-NAVYBLUE": "100 order given"
   },
-  "updated_at": "2026-08-07T07:40:24.464Z"
+  "updated_at": "2026-08-10T10:37:50.936Z"
 }
