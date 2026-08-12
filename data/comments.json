@@ -1,7 +1,6 @@
 {
   "comments": {
     "DP-BARFI-RANI": "30th July. Order 100 - pcs",
-    "DP-703-BEIGE": "4TH aUG. order placed",
     "DP-BUTY-WHITE": "order placed",
     "SH-401-BLACK": "order placed 150",
     "SH-401-WHITE": "order placed 100",
@@ -10,10 +9,7 @@
     "SH-405-BEIGE": "pending order 200",
     "SH-413-BLACK": "pending order 50",
     "DP2-HV-108": "pending order 50",
-    "DP-701-BLACK": "order given 100",
-    "DP-704-BEIGE": "order given 500",
     "DP-BUTY-ORANGE": "order given 50",
-    "DP-718-BEIGE": "Order given 500",
     "DP-710-WHITE": "200 order given",
     "DP-718-BLACK": "200 order given",
     "DP-718-RED": "100 order given",
@@ -30,5 +26,5 @@
     "DP-724-TRICOLOUR": "100 order given",
     "SH-403-NAVYBLUE": "100 order given"
   },
-  "updated_at": "2026-08-10T10:37:50.936Z"
+  "updated_at": "2026-08-12T07:33:25.694Z"
 }
