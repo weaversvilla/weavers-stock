@@ -4,19 +4,14 @@
     "DP-BUTY-WHITE": "order placed",
     "SH-401-BLACK": "order placed 150",
     "SH-401-WHITE": "order placed 100",
-    "SH-402-BLACK": "pending order 100",
     "SH-402-WHITE": "pending order 50",
     "SH-405-BEIGE": "pending order 200",
-    "SH-413-BLACK": "pending order 50",
     "DP2-HV-108": "pending order 50",
     "DP-BUTY-ORANGE": "order given 50",
-    "DP-710-WHITE": "200 order given",
     "DP-720-PEACH": "100 order given",
     "DP-720-PISTA": "100 order given",
     "DP-720-SKYBLUE": "100 order given",
-    "DP-726-MULTI": "500 order given",
-    "DP-724-TRICOLOUR": "100 order given",
     "SH-403-NAVYBLUE": "100 order given"
   },
-  "updated_at": "2026-08-18T11:51:55.343Z"
+  "updated_at": "2026-08-21T07:57:09.592Z"
 }
