@@ -4,7 +4,6 @@
     "DP-BUTY-WHITE": "order placed",
     "SH-401-BLACK": "order placed 150",
     "SH-402-WHITE": "pending order 50",
-    "DP2-HV-108": "pending order 50",
     "DP-BUTY-ORANGE": "order given 50",
     "DP-720-PEACH": "100 order given",
     "DP-720-PISTA": "100 order given",
@@ -19,7 +18,6 @@
     "DP-734-CREAM": "Order 100 pcs",
     "DP-734-GREEN": "Order 50 pcs",
     "DP-734-YELLOW": "Order 50 pcs",
-    "MS-666-WHITE": "100",
     "MS-992-LIGHTGREY": "100",
     "MS-CHECKS-WHITE": "50",
     "MS-KINGRI-WHITE": "Order 50 pcs",
@@ -40,5 +38,5 @@
     "SH-407-MUSTARD": "30",
     "SH-407-WHITE": "30"
   },
-  "updated_at": "2026-08-28T02:32:18.631Z"
+  "updated_at": "2026-08-31T10:32:25.300Z"
 }
