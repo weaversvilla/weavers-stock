@@ -14,7 +14,6 @@
     "DP-734-CREAM": "Order 100 pcs",
     "DP-734-GREEN": "Order 50 pcs",
     "DP-734-YELLOW": "Order 50 pcs",
-    "MS-992-LIGHTGREY": "100",
     "MS-CHECKS-WHITE": "50",
     "MUF-903": "500 pcs",
     "SH-403-RED": "30",
@@ -45,5 +44,5 @@
     "SH-402-RED": "100",
     "SH-405-BEIGE": "500"
   },
-  "updated_at": "2026-09-26T08:04:44.760Z"
+  "updated_at": "2026-10-01T12:48:39.761Z"
 }
