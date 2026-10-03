@@ -3,7 +3,6 @@
     "SH-402-WHITE": "pending order 50",
     "DP-720-PEACH": "100 order given",
     "DP-720-PISTA": "100 order given",
-    "DP-720-SKYBLUE": "100 order given",
     "SH-403-NAVYBLUE": "100 order given",
     "CAP-SINGLE-GREY": "Order 300 pcs",
     "CAP-SINGLE-NAVY": "Order 300 pcs",
@@ -29,7 +28,6 @@
     "SH-407-WHITE": "30",
     "SH-132-BEIGE": "50",
     "SH-132-RED": "50",
-    "SH-133-BLACK": "50",
     "SH-133-NEWGREEN": "50",
     "SH-133-RED": "50",
     "SH-134-BEIGE": "50",
@@ -44,5 +42,5 @@
     "SH-402-RED": "100",
     "SH-405-BEIGE": "500"
   },
-  "updated_at": "2026-10-01T12:48:39.761Z"
+  "updated_at": "2026-10-03T09:23:59.300Z"
 }
