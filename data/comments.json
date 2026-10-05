@@ -10,9 +10,6 @@
     "DM-PRAYERMAT-BLUE": "Order 200 pcs",
     "DMS-ALIA-BEIGE": "Order 100 pcs",
     "DP-BARFI-ROYALBLUE": "Order 60 pc",
-    "DP-734-CREAM": "Order 100 pcs",
-    "DP-734-GREEN": "Order 50 pcs",
-    "DP-734-YELLOW": "Order 50 pcs",
     "MS-CHECKS-WHITE": "50",
     "MUF-903": "500 pcs",
     "SH-403-RED": "30",
@@ -33,9 +30,6 @@
     "SH-134-BEIGE": "50",
     "SH-134-BLACK": "50",
     "SH-134-NEWGREEN": "50",
-    "DP-727-LIGHTPINK": "30",
-    "DP-727-YELLOW": "30",
-    "DP-727-RANI": "100",
     "DINE-CHAKRI-COFFEE": "100",
     "MS-DAUR-WHITE": "100",
     "SH-402-BEIGE": "200",
@@ -45,5 +39,5 @@
     "DP-718-BEIGE": "200",
     "DP-718-RED": "50"
   },
-  "updated_at": "2026-10-03T11:39:32.746Z"
+  "updated_at": "2026-10-05T13:21:04.814Z"
 }
