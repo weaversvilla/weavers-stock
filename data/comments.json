@@ -23,12 +23,10 @@
     "SH-407-BLACK": "30",
     "SH-407-MUSTARD": "30",
     "SH-407-WHITE": "30",
-    "SH-132-BEIGE": "50",
     "SH-132-RED": "50",
     "SH-133-NEWGREEN": "50",
     "SH-133-RED": "50",
     "SH-134-BEIGE": "50",
-    "SH-134-BLACK": "50",
     "SH-134-NEWGREEN": "50",
     "DINE-CHAKRI-COFFEE": "100",
     "MS-DAUR-WHITE": "100",
@@ -39,5 +37,5 @@
     "DP-718-BEIGE": "200",
     "DP-718-RED": "50"
   },
-  "updated_at": "2026-10-05T13:21:04.814Z"
+  "updated_at": "2026-10-08T10:50:23.120Z"
 }
