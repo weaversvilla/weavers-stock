@@ -15,19 +15,14 @@
     "SH-403-RED": "30",
     "SH-403-ROSE": "30",
     "SH-404-BEIGE": "30",
-    "SH-404-NAVYBLUE": "30",
     "SH-406-MUSTARD": "30",
     "SH-406-ROSE": "30",
     "SH-407-BEIGE": "30",
     "SH-407-BLACK": "30",
     "SH-407-MUSTARD": "30",
     "SH-407-WHITE": "30",
-    "SH-132-RED": "50",
     "SH-133-NEWGREEN": "50",
-    "SH-133-RED": "50",
-    "SH-134-BEIGE": "50",
     "SH-134-NEWGREEN": "50",
-    "DINE-CHAKRI-COFFEE": "100",
     "MS-DAUR-WHITE": "100",
     "SH-402-BEIGE": "200",
     "SH-402-RED": "100",
@@ -58,5 +53,5 @@
     "DINE-POLKA-GOLDEN": "300",
     "DINE-PVC-GOLD": "100"
   },
-  "updated_at": "2026-10-14T12:16:54.346Z"
+  "updated_at": "2026-10-18T04:30:07.354Z"
 }
