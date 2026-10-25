@@ -1,6 +1,5 @@
 {
   "comments": {
-    "SH-402-WHITE": "pending order 50",
     "DP-720-PEACH": "100 order given",
     "DP-720-PISTA": "100 order given",
     "SH-403-NAVYBLUE": "100 order given",
@@ -18,20 +17,16 @@
     "SH-406-MUSTARD": "30",
     "SH-406-ROSE": "30",
     "SH-407-BEIGE": "30",
-    "SH-407-MUSTARD": "30",
     "SH-407-WHITE": "30",
     "SH-133-NEWGREEN": "50",
     "SH-134-NEWGREEN": "50",
     "SH-402-BEIGE": "200",
     "SH-402-RED": "100",
-    "SH-405-BEIGE": "500",
-    "DP-726-MULTI": "500",
     "DP-718-BEIGE": "200",
     "DP-718-RED": "50",
     "DP2-HV-102": "100",
     "DP2-HV-107": "100",
     "DP2-HV-106": "100",
-    "DP2-HV-101": "100",
     "DP2-HV-105": "100",
     "DP2-HV-108": "100",
     "DP-727-BLACK": "100",
@@ -46,9 +41,7 @@
     "MS-DIGITAL-176-ORANGE": "30",
     "MS-DIGITAL-176-NAVY": "30",
     "DINE-KETSAAL-RUST": "300",
-    "DINE-CHAKRI-MAROON": "200",
-    "DINE-POLKA-GOLDEN": "300",
-    "DINE-PVC-GOLD": "100"
+    "DINE-CHAKRI-MAROON": "200"
   },
-  "updated_at": "2026-10-22T04:28:16.055Z"
+  "updated_at": "2026-10-25T05:43:31.789Z"
 }
