@@ -17,7 +17,6 @@
     "SH-406-MUSTARD": "30",
     "SH-406-ROSE": "30",
     "SH-407-BEIGE": "30",
-    "SH-407-WHITE": "30",
     "SH-133-NEWGREEN": "50",
     "SH-134-NEWGREEN": "50",
     "SH-402-BEIGE": "200",
@@ -26,11 +25,8 @@
     "DP-718-RED": "50",
     "DP2-HV-102": "100",
     "DP2-HV-107": "100",
-    "DP2-HV-106": "100",
-    "DP2-HV-105": "100",
     "DP2-HV-108": "100",
     "DP-727-BLACK": "100",
-    "DP-727-LIGHTPINK": "50",
     "DP-727-NAVYBLUE": "50",
     "DP-727-RANI": "100",
     "DP-BARFI-RANI": "200",
@@ -44,5 +40,5 @@
     "DINE-CHAKRI-MAROON": "200",
     "MS-987-IVORY": "1000"
   },
-  "updated_at": "2026-10-26T04:55:08.005Z"
+  "updated_at": "2026-10-26T12:35:48.002Z"
 }
