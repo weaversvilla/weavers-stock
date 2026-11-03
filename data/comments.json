@@ -2,7 +2,6 @@
   "comments": {
     "DP-720-PEACH": "100 order given",
     "DP-720-PISTA": "100 order given",
-    "SH-403-NAVYBLUE": "100 order given",
     "CAP-SINGLE-GREY": "Order 300 pcs",
     "CAP-SINGLE-NAVY": "Order 300 pcs",
     "DINE-PETALS-COFFEE": "Order 30 pcs",
@@ -17,7 +16,6 @@
     "SH-407-BEIGE": "30",
     "SH-133-NEWGREEN": "50",
     "SH-134-NEWGREEN": "50",
-    "SH-402-BEIGE": "200",
     "SH-402-RED": "100",
     "DP-718-BEIGE": "200",
     "DP-718-RED": "50",
@@ -31,5 +29,5 @@
     "DP-725-RANI": "200",
     "DP-724-RED": "150"
   },
-  "updated_at": "2026-11-02T05:51:11.616Z"
+  "updated_at": "2026-11-03T06:46:49.859Z"
 }
