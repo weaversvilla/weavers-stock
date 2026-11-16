@@ -92,11 +92,12 @@ PLATFORM_MAP = {
     "flipkart":       [1414],
     "myntra":         [1492],
     "ajio":           [1548],
-    "meesho":         [],   # auto-detected by name via getOrderSources
-    "shopify":        [],   # auto-detected by name via getOrderSources
-    "others":         [1636, 1601, 9000337],
+    "meesho":         [1636, 2198],  # also auto-detected by name via getOrderSources
+    "shopify":        [9000337],     # BL "shop" source named "Website"
+    "nykaa":          [1601],
+    "others":         [],            # manual / phone orders and anything unmapped
 }
-CHANNELS = ["amazon", "amazon_vendor", "flipkart", "myntra", "ajio", "meesho", "shopify", "others"]
+CHANNELS = ["amazon", "amazon_vendor", "flipkart", "myntra", "ajio", "meesho", "shopify", "nykaa", "others"]
 CHANNEL_KEYWORDS = {"meesho": "meesho", "shopify": "shopify"}
 DYNAMIC_SOURCE_MAP = {}     # {order_source_id: channel}, filled by load_dynamic_sources()
 UNMAPPED_SOURCES = {}       # {(order_source, order_source_id): order count} — for diagnosis
@@ -1057,6 +1058,7 @@ def build_report():
             "ajio":          sales["d30"].get(sku, {}).get("ajio", 0),
             "meesho":        sales["d30"].get(sku, {}).get("meesho", 0),
             "shopify":       sales["d30"].get(sku, {}).get("shopify", 0),
+            "nykaa":         sales["d30"].get(sku, {}).get("nykaa", 0),
             "others":        sales["d30"].get(sku, {}).get("others", 0),
             "global":        sales["d30"].get(sku, {}).get("global", 0),
         }

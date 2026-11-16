@@ -158,6 +158,7 @@ tbody tr.dead-stock{opacity:0.85}
 .platform-pill.ajio{background:rgba(0,200,150,0.15);color:#00c896}
 .platform-pill.meesho{background:rgba(244,51,151,0.15);color:#f43397}
 .platform-pill.shopify{background:rgba(122,181,92,0.15);color:#7ab55c}
+.platform-pill.nykaa{background:rgba(252,39,121,0.12);color:#fc4f93}
 .platform-pill.global{background:rgba(180,120,255,0.15);color:#b478ff}
 .platform-pill.others{background:rgba(160,160,160,0.15);color:#a0a0a0}
 
@@ -386,7 +387,7 @@ const CHANNEL_META = [
   ["amazon","Amazon","#ff9900"], ["amazon_vendor","Amazon Vendor","#ffb733"],
   ["flipkart","Flipkart","#2f74ff"], ["myntra","Myntra","#ff3f6c"],
   ["ajio","Ajio","#00c896"], ["meesho","Meesho","#f43397"],
-  ["shopify","Shopify (Website)","#7ab55c"], ["global","Global (US/UK/UAE)","#b478ff"],
+  ["shopify","Shopify (Website)","#7ab55c"], ["nykaa","Nykaa","#fc2779"], ["global","Global (US/UK/UAE)","#b478ff"],
   ["others","Others","#a0a0a0"],
 ];
 
@@ -423,7 +424,7 @@ function ChannelSales({ data }) {
 
   const exportCsv = () => {
     const esc = v => `"${String(v ?? "").replace(/"/g,'""')}"`;
-    const head = [keyLabel, "EAN (from orders)", otherLabel, "Name", "Orders", "Units", "Revenue"];
+    const head = [keyLabel, "EAN / Listing ID (from orders)", otherLabel, "Name", "Orders", "Units", "Revenue"];
     const csv = [head, ...skuRows].map(r => r.map(esc).join(",")).join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"}));
@@ -494,7 +495,7 @@ function ChannelSales({ data }) {
               <table style={{width:"100%",borderCollapse:"collapse"}}>
                 <thead style={{position:"sticky",top:0,background:"var(--bg2)"}}><tr>
                   <th style={{...th,textAlign:"left"}}>{keyLabel}</th>
-                  <th style={{...th,textAlign:"left"}}>EAN</th>
+                  <th style={{...th,textAlign:"left"}} title="As received on the order: ASIN for Amazon, FSN/listing ID for Flipkart, style/article ID for Myntra/Ajio">EAN / Listing ID</th>
                   <th style={{...th,textAlign:"left"}}>{otherLabel}</th>
                   <th style={{...th,textAlign:"left"}}>Name</th>
                   {sortTh(4,"Orders")}{sortTh(5,"Units")}{sortTh(6,"Revenue")}
@@ -910,7 +911,7 @@ function App() {
   const exportCSV = () => {
     if (!data) return;
     const totalVal = data.summary.totalStockValue || 1;
-    const headers = ["SKU","Name","Stock","Status","Days Left","Velocity/day","7d Sales","15d Sales","30d Sales","90d Sales","Returns 30d","Stock Value","% of Total","Amazon 30d","Amazon Vendor 30d","Flipkart 30d","Myntra 30d","Ajio 30d","Meesho 30d","Shopify 30d","Global 30d","Others 30d","Suggested Order"];
+    const headers = ["SKU","Name","Stock","Status","Days Left","Velocity/day","7d Sales","15d Sales","30d Sales","90d Sales","Returns 30d","Stock Value","% of Total","Amazon 30d","Amazon Vendor 30d","Flipkart 30d","Myntra 30d","Ajio 30d","Meesho 30d","Shopify 30d","Nykaa 30d","Global 30d","Others 30d","Suggested Order"];
     const rows = filtered.map(p => {
       const status = (p.isDeadStock && p.status !== "DEAD_STOCK") ? "DEAD_STOCK" : p.status;
       return [
@@ -927,6 +928,7 @@ function App() {
         p.platformSales?.ajio || 0,
         p.platformSales?.meesho || 0,
         p.platformSales?.shopify || 0,
+        p.platformSales?.nykaa || 0,
         p.platformSales?.global || 0,
         p.platformSales?.others || 0,
         Math.ceil((p.suggestedOrder || 0) * seasonalMult),
@@ -1122,7 +1124,7 @@ function App() {
           {/* Platform filter */}
           <div className="controls" style={{marginBottom:16}}>
             <span style={{fontSize:12,color:"var(--text3)",fontWeight:700,letterSpacing:1,textTransform:"uppercase"}}>Platform:</span>
-            {["ALL","amazon","amazon_vendor","flipkart","myntra","ajio","meesho","shopify","global","others"].map(p => (
+            {["ALL","amazon","amazon_vendor","flipkart","myntra","ajio","meesho","shopify","nykaa","global","others"].map(p => (
               <button key={p} className={`filter-btn ${platformFilter===p ? "active":""}`}
                 onClick={() => setPlatformFilter(p)}>
                 {p === "ALL" ? "All Platforms" : p === "amazon_vendor" ? "Amazon Vendor" : p === "global" ? "🌐 Global" : p.charAt(0).toUpperCase()+p.slice(1)}
@@ -1236,9 +1238,10 @@ function App() {
                           {(p.platformSales?.ajio > 0) && <span className="platform-pill ajio">AJ {p.platformSales.ajio}</span>}
                           {(p.platformSales?.meesho > 0) && <span className="platform-pill meesho">ME {p.platformSales.meesho}</span>}
                           {(p.platformSales?.shopify > 0) && <span className="platform-pill shopify">SH {p.platformSales.shopify}</span>}
+                          {(p.platformSales?.nykaa > 0) && <span className="platform-pill nykaa">NY {p.platformSales.nykaa}</span>}
                           {(p.platformSales?.others > 0) && <span className="platform-pill others">OT {p.platformSales.others}</span>}
                           {(p.platformSales?.global > 0) && <span className="platform-pill global">GL {p.platformSales.global}</span>}
-                          {(!p.platformSales?.amazon && !p.platformSales?.amazon_vendor && !p.platformSales?.flipkart && !p.platformSales?.myntra && !p.platformSales?.ajio && !p.platformSales?.meesho && !p.platformSales?.shopify && !p.platformSales?.global && !p.platformSales?.others) && <span style={{color:"var(--text3)",fontSize:12}}>—</span>}
+                          {(!p.platformSales?.amazon && !p.platformSales?.amazon_vendor && !p.platformSales?.flipkart && !p.platformSales?.myntra && !p.platformSales?.ajio && !p.platformSales?.meesho && !p.platformSales?.shopify && !p.platformSales?.nykaa && !p.platformSales?.global && !p.platformSales?.others) && <span style={{color:"var(--text3)",fontSize:12}}>—</span>}
                         </div>
                       </td>
                       <td><span className={p.returns?.d30 > 0 ? "num-danger" : "num"}>{p.returns?.d30 ?? 0}</span></td>
