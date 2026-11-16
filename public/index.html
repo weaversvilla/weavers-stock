@@ -391,7 +391,12 @@ const CHANNEL_META = [
 ];
 
 function ChannelSales({ data }) {
-  const [win, setWin] = React.useState("d30");
+  const [win, setWin]   = React.useState("d30");
+  const [sel, setSel]   = React.useState(null);
+  const [view, setView] = React.useState("channel");
+  const [q, setQ]       = React.useState("");
+  const [sortK, setSortK] = React.useState(5);
+  const [all, setAll]   = React.useState(false);
   const cs = data?.summary?.channelSales?.[win];
   if (!cs) return null;
   const rows = CHANNEL_META.map(([k, label, color]) => ({ k, label, color, ...(cs[k] || {units:0, orders:0, revenue:0}) }));
@@ -399,9 +404,38 @@ function ChannelSales({ data }) {
   const totRev   = rows.reduce((s, r) => s + (r.revenue || 0), 0) || 1;
   const totOrd   = rows.reduce((s, r) => s + (r.orders || 0), 0);
   const maxRev   = Math.max(...rows.map(r => r.revenue || 0), 1);
-  const inr = n => "₹" + Math.round(n).toLocaleString("en-IN");
-  const th = {textAlign:"right",padding:"6px 10px",fontSize:11,color:"var(--text3)",letterSpacing:1,textTransform:"uppercase"};
+  const inr = n => n == null ? "—" : "₹" + Math.round(n).toLocaleString("en-IN");
+  const num = n => n == null ? "—" : n.toLocaleString("en-IN");
+  const th = {textAlign:"right",padding:"6px 10px",fontSize:11,color:"var(--text3)",letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"};
   const td = {textAlign:"right",padding:"7px 10px",fontFamily:"var(--mono)",fontSize:13};
+  const tdL = {...td,textAlign:"left"};
+
+  // SKU breakdown for selected channel
+  const brk   = sel ? (data.channelSkus?.[win]?.[sel] || null) : null;
+  const vEff  = (sel === "global") ? "product" : view;
+  const query = q.trim().toLowerCase();
+  let skuRows = (brk?.[vEff] || []).filter(r => !query || r.slice(0,4).join(" ").toLowerCase().includes(query));
+  skuRows = [...skuRows].sort((a, b) => (b[sortK] || 0) - (a[sortK] || 0));
+  const shown = all ? skuRows : skuRows.slice(0, 100);
+  const selLabel = CHANNEL_META.find(m => m[0] === sel)?.[1];
+  const keyLabel   = vEff === "channel" ? "Channel SKU" : "Product SKU";
+  const otherLabel = vEff === "channel" ? "Product SKU" : "Channel SKU(s)";
+
+  const exportCsv = () => {
+    const esc = v => `"${String(v ?? "").replace(/"/g,'""')}"`;
+    const head = [keyLabel, "EAN (from orders)", otherLabel, "Name", "Orders", "Units", "Revenue"];
+    const csv = [head, ...skuRows].map(r => r.map(esc).join(",")).join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"}));
+    a.download = `${sel}-${vEff}-sku-${win}-${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+  };
+  const sortTh = (i, label) => (
+    <th style={{...th,cursor:"pointer",color: sortK===i ? "var(--accent)" : th.color}} onClick={() => setSortK(i)}>
+      {label}{sortK===i ? " ↓" : ""}
+    </th>
+  );
+
   return (
     <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:16,marginBottom:16}}>
       <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:10}}>
@@ -421,12 +455,14 @@ function ChannelSales({ data }) {
           </tr></thead>
           <tbody>
             {rows.map(r => (
-              <tr key={r.k} style={{borderTop:"1px solid var(--border)"}}>
-                <td style={{...td,textAlign:"left",fontFamily:"inherit",fontWeight:600}}>
+              <tr key={r.k} onClick={() => { setSel(sel === r.k ? null : r.k); setQ(""); setAll(false); }}
+                  style={{borderTop:"1px solid var(--border)",cursor:"pointer",background: sel===r.k ? "rgba(255,255,255,0.05)" : "transparent"}}>
+                <td style={{...tdL,fontFamily:"inherit",fontWeight:600}}>
                   <span style={{display:"inline-block",width:9,height:9,borderRadius:2,background:r.color,marginRight:8}}/>{r.label}
+                  <span style={{fontSize:11,color:"var(--text3)",marginLeft:6}}>{sel===r.k ? "▾" : "▸"}</span>
                 </td>
-                <td style={td}>{r.orders == null ? "—" : r.orders.toLocaleString("en-IN")}</td>
-                <td style={td}>{(r.units||0).toLocaleString("en-IN")}</td>
+                <td style={td}>{num(r.orders)}</td>
+                <td style={td}>{num(r.units||0)}</td>
                 <td style={td}>{r.revenue == null ? "n/a" : inr(r.revenue)}</td>
                 <td style={td}>{r.revenue == null ? "—" : (100*r.revenue/totRev).toFixed(1)+"%"}</td>
                 <td style={{padding:"7px 10px"}}>
@@ -437,7 +473,56 @@ function ChannelSales({ data }) {
           </tbody>
         </table>
       </div>
-      <div style={{fontSize:11,color:"var(--text3)",marginTop:8}}>Revenue = order value as entered in Baselinker (incl. GST). Global shows units only (SP-API report has no ₹ value).</div>
+
+      {sel && (
+        <div style={{marginTop:14,borderTop:"1px solid var(--border)",paddingTop:12}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:8}}>
+            <span style={{fontWeight:700,fontSize:13}}>{selLabel} — SKU breakdown ({win.slice(1)}d)</span>
+            <button className={`filter-btn ${vEff==="channel"?"active":""}`} disabled={sel==="global"}
+                    style={sel==="global" ? {opacity:0.4,cursor:"not-allowed"} : {}}
+                    onClick={() => setView("channel")}>Channel SKU</button>
+            <button className={`filter-btn ${vEff==="product"?"active":""}`} onClick={() => setView("product")}>Product SKU</button>
+            <input className="search" style={{maxWidth:220,padding:"5px 10px"}} placeholder="Search SKU / EAN / name"
+                   value={q} onChange={e => setQ(e.target.value)}/>
+            <button className="filter-btn" onClick={exportCsv} disabled={!skuRows.length}>⬇ CSV</button>
+            <span style={{marginLeft:"auto",fontSize:12,color:"var(--text3)"}}>{skuRows.length.toLocaleString("en-IN")} SKUs</span>
+          </div>
+          {!brk ? (
+            <div style={{fontSize:12,color:"var(--text3)",padding:8}}>No SKU data yet for this channel — it appears after the next report run.</div>
+          ) : (
+            <div style={{overflowX:"auto",maxHeight:480,overflowY:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead style={{position:"sticky",top:0,background:"var(--bg2)"}}><tr>
+                  <th style={{...th,textAlign:"left"}}>{keyLabel}</th>
+                  <th style={{...th,textAlign:"left"}}>EAN</th>
+                  <th style={{...th,textAlign:"left"}}>{otherLabel}</th>
+                  <th style={{...th,textAlign:"left"}}>Name</th>
+                  {sortTh(4,"Orders")}{sortTh(5,"Units")}{sortTh(6,"Revenue")}
+                </tr></thead>
+                <tbody>
+                  {shown.map(r => (
+                    <tr key={r[0]} style={{borderTop:"1px solid var(--border)"}}>
+                      <td style={{...tdL,fontSize:12}}>{r[0]}</td>
+                      <td style={{...tdL,fontSize:12,color:"var(--text2)"}}>{r[1] || "—"}</td>
+                      <td style={{...tdL,fontSize:12,color:"var(--text2)",maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={r[2]}>{r[2] || "—"}</td>
+                      <td style={{...tdL,fontFamily:"inherit",fontSize:12,maxWidth:280,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={r[3]}>{r[3] || "—"}</td>
+                      <td style={td}>{num(r[4])}</td>
+                      <td style={td}>{num(r[5])}</td>
+                      <td style={td}>{inr(r[6])}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {skuRows.length > 100 && (
+                <div style={{textAlign:"center",padding:8}}>
+                  <button className="filter-btn" onClick={() => setAll(!all)}>{all ? "Show top 100" : `Show all ${skuRows.length}`}</button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      <div style={{fontSize:11,color:"var(--text3)",marginTop:8}}>Click a channel to see SKU-wise sales. Channel SKU &amp; EAN are as received on the order; Product SKU is the linked Baselinker product. Revenue incl. GST. Global = units only, by master SKU.</div>
     </div>
   );
 }

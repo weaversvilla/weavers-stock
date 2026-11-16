@@ -100,6 +100,7 @@ CHANNELS = ["amazon", "amazon_vendor", "flipkart", "myntra", "ajio", "meesho", "
 CHANNEL_KEYWORDS = {"meesho": "meesho", "shopify": "shopify"}
 DYNAMIC_SOURCE_MAP = {}     # {order_source_id: channel}, filled by load_dynamic_sources()
 UNMAPPED_SOURCES = {}       # {(order_source, order_source_id): order count} — for diagnosis
+ALL_SOURCES = []            # every source from getOrderSources, for diagnosis
 
 def blank_sales():
     d = {"total": 0, "global": 0}
@@ -178,11 +179,13 @@ def load_dynamic_sources():
             if not isinstance(items, dict):
                 continue
             for sid, sname in items.items():
+                ALL_SOURCES.append({"type": stype, "id": sid, "name": sname})
                 text = f"{stype} {sname}".lower()
                 for kw, channel in CHANNEL_KEYWORDS.items():
                     if kw in text:
                         DYNAMIC_SOURCE_MAP[int(sid)] = channel
                         print(f"  Source {sid} ({stype}: {sname}) -> {channel}")
+        print("  All order sources:", [(x["type"], x["id"], x["name"]) for x in ALL_SOURCES])
         if not DYNAMIC_SOURCE_MAP:
             print("  WARNING: no Meesho/Shopify source found in getOrderSources")
     except Exception as e:
@@ -787,26 +790,65 @@ def aggregate_sales(orders, bundle_map={}, id_to_sku={}):
                 sales[sku][platform] = sales[sku].get(platform, 0) + qty
     return sales
 
-def aggregate_channels(orders):
-    """Channel-wise totals: units, orders, revenue (₹, price_brutto × qty). Not bundle-remapped."""
+def aggregate_channels(orders, id_to_sku={}):
+    """Channel-wise totals + per-SKU breakdown. Not bundle-remapped.
+    Channel SKU and EAN come from the ORDER line (as the marketplace sent it),
+    Product SKU is the linked Baselinker inventory SKU.
+    Breakdown rows: [key, eans, other_skus, name, orders, units, revenue]
+      - view "channel": key = channel SKU, other_skus = linked product SKU(s)
+      - view "product": key = product SKU, other_skus = channel SKU(s)"""
     out = {c: {"units": 0, "orders": 0, "revenue": 0.0} for c in CHANNELS}
+    agg = {c: {"channel": {}, "product": {}} for c in CHANNELS}
+
+    def bump(bucket, key, ean, other, name, q, rev, oid):
+        r = bucket.get(key)
+        if r is None:
+            r = bucket[key] = {"eans": set(), "other": set(), "name": name, "orders": set(), "units": 0, "rev": 0.0}
+        if ean:   r["eans"].add(ean)
+        if other: r["other"].add(other)
+        if not r["name"] and name: r["name"] = name
+        r["orders"].add(oid)
+        r["units"] += q
+        r["rev"]   += rev
+
     for order in orders:
         if order.get("order_source") == "order_return":
             continue
         if order.get("order_status_id") == CANCELLED_STATUS_ID:
             continue
-        ch = get_platform(order.get("order_source_id", 0), order.get("order_source", ""))
+        ch  = get_platform(order.get("order_source_id", 0), order.get("order_source", ""))
+        oid = order.get("order_id")
         units, rev = 0, 0.0
         for p in order.get("products", []):
-            q = int(p.get("quantity", 0))
+            q    = int(p.get("quantity", 0))
+            lrev = q * float(p.get("price_brutto", 0) or 0)
             units += q
-            rev += q * float(p.get("price_brutto", 0) or 0)
+            rev   += lrev
+            csku = (p.get("sku") or "").strip() or "(no channel SKU)"
+            ean  = (p.get("ean") or "").strip()
+            psku = id_to_sku.get(str(p.get("product_id", ""))) or "(not linked)"
+            name = (p.get("name") or "").strip()
+            bump(agg[ch]["channel"], csku, ean, psku, name, q, lrev, oid)
+            bump(agg[ch]["product"], psku, ean, csku, name, q, lrev, oid)
         out[ch]["units"]   += units
         out[ch]["orders"]  += 1
         out[ch]["revenue"] += rev
+
     for c in out:
         out[c]["revenue"] = round(out[c]["revenue"])
-    return out
+
+    breakdown = {}
+    for c, views in agg.items():
+        if not views["channel"]:
+            continue
+        breakdown[c] = {}
+        for view, bucket in views.items():
+            rows = [[k, " / ".join(sorted(r["eans"])), " / ".join(sorted(r["other"])), r["name"],
+                     len(r["orders"]), r["units"], round(r["rev"])]
+                    for k, r in bucket.items()]
+            rows.sort(key=lambda x: -x[5])
+            breakdown[c][view] = rows
+    return out, breakdown
 
 def aggregate_returns(orders, id_to_sku={}):
     """Returns from orders panel (order_source = order_return)"""
@@ -1074,19 +1116,26 @@ def build_report():
     }
 
     # Channel-wise sales (units / orders / revenue) per window
-    channel_sales = {}
+    channel_sales, channel_skus = {}, {}
     for key, ords in (("d7", orders_d7), ("d15", orders_d15), ("d30", orders_d30), ("d90", orders90)):
-        ch = aggregate_channels(ords)
+        ch, brk = aggregate_channels(ords, id_to_sku)
         ch["global"] = {"units": sum(w.get(key, 0) for w in global_sales.values()),
                         "orders": None, "revenue": None}   # SP-API report parse gives units only
+        g_rows = [[msku, "", "", "", None, w.get(key, 0), None]
+                  for msku, w in global_sales.items() if w.get(key, 0)]
+        if g_rows:
+            g_rows.sort(key=lambda x: -x[5])
+            brk["global"] = {"product": g_rows, "channel": []}   # global is merged to master SKU only
         channel_sales[key] = ch
+        channel_skus[key]  = brk
     summary["channelSales"] = channel_sales
+    summary["orderSources"] = [dict(x, channel=get_platform(int(x["id"]), x["type"])) for x in ALL_SOURCES]
 
     if UNMAPPED_SOURCES:
         top = sorted(UNMAPPED_SOURCES.items(), key=lambda x: -x[1])[:10]
         print("  Order sources falling into 'others' (source_type, id): count ->", top)
 
-    return {"summary": summary, "products": report}
+    return {"summary": summary, "products": report, "channelSkus": channel_skus}
 
 # ── Upload to GitHub ──────────────────────────────────────────────────────────
 def upload_to_github(data):
