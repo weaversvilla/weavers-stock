@@ -92,8 +92,20 @@ PLATFORM_MAP = {
     "flipkart":       [1414],
     "myntra":         [1492],
     "ajio":           [1548],
+    "meesho":         [],   # auto-detected by name via getOrderSources
+    "shopify":        [],   # auto-detected by name via getOrderSources
     "others":         [1636, 1601, 9000337],
 }
+CHANNELS = ["amazon", "amazon_vendor", "flipkart", "myntra", "ajio", "meesho", "shopify", "others"]
+CHANNEL_KEYWORDS = {"meesho": "meesho", "shopify": "shopify"}
+DYNAMIC_SOURCE_MAP = {}     # {order_source_id: channel}, filled by load_dynamic_sources()
+UNMAPPED_SOURCES = {}       # {(order_source, order_source_id): order count} — for diagnosis
+
+def blank_sales():
+    d = {"total": 0, "global": 0}
+    for c in CHANNELS:
+        d[c] = 0
+    return d
 
 WEIGHTS = {"d7": 0.40, "d15": 0.30, "d30": 0.20, "d90": 0.10}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -158,10 +170,32 @@ def bl_call(method, params={}):
 def days_ago(days):
     return int(time.time()) - days * 86400
 
-def get_platform(source_id):
+def load_dynamic_sources():
+    """Find Meesho / Shopify source IDs by NAME from Baselinker (no hardcoded IDs)."""
+    try:
+        res = bl_call("getOrderSources")
+        for stype, items in (res.get("sources") or {}).items():
+            if not isinstance(items, dict):
+                continue
+            for sid, sname in items.items():
+                text = f"{stype} {sname}".lower()
+                for kw, channel in CHANNEL_KEYWORDS.items():
+                    if kw in text:
+                        DYNAMIC_SOURCE_MAP[int(sid)] = channel
+                        print(f"  Source {sid} ({stype}: {sname}) -> {channel}")
+        if not DYNAMIC_SOURCE_MAP:
+            print("  WARNING: no Meesho/Shopify source found in getOrderSources")
+    except Exception as e:
+        print(f"  Could not load order sources: {e}")
+
+def get_platform(source_id, source_type=""):
+    if source_id in DYNAMIC_SOURCE_MAP:
+        return DYNAMIC_SOURCE_MAP[source_id]
     for name, ids in PLATFORM_MAP.items():
         if source_id in ids:
             return name
+    key = (source_type, source_id)
+    UNMAPPED_SOURCES[key] = UNMAPPED_SOURCES.get(key, 0) + 1
     return "others"
 
 # ── Amazon SP-API — Global Sales ──────────────────────────────────────────────
@@ -731,7 +765,7 @@ def aggregate_sales(orders, bundle_map={}, id_to_sku={}):
         # Skip cancelled orders
         if order.get("order_status_id") == CANCELLED_STATUS_ID:
             continue
-        platform = get_platform(order.get("order_source_id", 0))
+        platform = get_platform(order.get("order_source_id", 0), order.get("order_source", ""))
         for product in order.get("products", []):
             product_id = str(product.get("product_id", ""))
             sku = id_to_sku.get(product_id) or product.get("sku", "")
@@ -743,17 +777,36 @@ def aggregate_sales(orders, bundle_map={}, id_to_sku={}):
                 for component_sku, component_qty in bundle_map[sku].items():
                     total_qty = qty * component_qty
                     if component_sku not in sales:
-                        sales[component_sku] = {"total": 0, "amazon": 0, "amazon_vendor": 0,
-                                                "flipkart": 0, "myntra": 0, "ajio": 0, "others": 0}
+                        sales[component_sku] = blank_sales()
                     sales[component_sku]["total"] += total_qty
                     sales[component_sku][platform] = sales[component_sku].get(platform, 0) + total_qty
             else:
                 if sku not in sales:
-                    sales[sku] = {"total": 0, "amazon": 0, "amazon_vendor": 0,
-                                  "flipkart": 0, "myntra": 0, "ajio": 0, "others": 0}
+                    sales[sku] = blank_sales()
                 sales[sku]["total"] += qty
                 sales[sku][platform] = sales[sku].get(platform, 0) + qty
     return sales
+
+def aggregate_channels(orders):
+    """Channel-wise totals: units, orders, revenue (₹, price_brutto × qty). Not bundle-remapped."""
+    out = {c: {"units": 0, "orders": 0, "revenue": 0.0} for c in CHANNELS}
+    for order in orders:
+        if order.get("order_source") == "order_return":
+            continue
+        if order.get("order_status_id") == CANCELLED_STATUS_ID:
+            continue
+        ch = get_platform(order.get("order_source_id", 0), order.get("order_source", ""))
+        units, rev = 0, 0.0
+        for p in order.get("products", []):
+            q = int(p.get("quantity", 0))
+            units += q
+            rev += q * float(p.get("price_brutto", 0) or 0)
+        out[ch]["units"]   += units
+        out[ch]["orders"]  += 1
+        out[ch]["revenue"] += rev
+    for c in out:
+        out[c]["revenue"] = round(out[c]["revenue"])
+    return out
 
 def aggregate_returns(orders, id_to_sku={}):
     """Returns from orders panel (order_source = order_return)"""
@@ -845,6 +898,9 @@ def build_report():
     product_ids = [int(k) for k in products.keys()]
     stock_data  = get_stock(product_ids)
 
+    print("Detecting Meesho / Shopify sources...")
+    load_dynamic_sources()
+
     print("Building bundle map...")
     bundle_map, id_to_sku = build_bundle_map(products, stock_data)
 
@@ -904,9 +960,7 @@ def build_report():
             if qty == 0:
                 continue
             if master_sku not in sales[window]:
-                sales[window][master_sku] = {"total": 0, "amazon": 0, "amazon_vendor": 0,
-                                              "flipkart": 0, "myntra": 0, "ajio": 0,
-                                              "others": 0, "global": 0}
+                sales[window][master_sku] = blank_sales()
             sales[window][master_sku]["total"]  = sales[window][master_sku].get("total", 0) + qty
             sales[window][master_sku]["global"] = sales[window][master_sku].get("global", 0) + qty
 
@@ -959,6 +1013,8 @@ def build_report():
             "flipkart":      sales["d30"].get(sku, {}).get("flipkart", 0),
             "myntra":        sales["d30"].get(sku, {}).get("myntra", 0),
             "ajio":          sales["d30"].get(sku, {}).get("ajio", 0),
+            "meesho":        sales["d30"].get(sku, {}).get("meesho", 0),
+            "shopify":       sales["d30"].get(sku, {}).get("shopify", 0),
             "others":        sales["d30"].get(sku, {}).get("others", 0),
             "global":        sales["d30"].get(sku, {}).get("global", 0),
         }
@@ -1016,6 +1072,19 @@ def build_report():
         "generatedAt":      datetime.now(timezone.utc).isoformat(),
         "seasonalMult":     SEASONAL_MULT,
     }
+
+    # Channel-wise sales (units / orders / revenue) per window
+    channel_sales = {}
+    for key, ords in (("d7", orders_d7), ("d15", orders_d15), ("d30", orders_d30), ("d90", orders90)):
+        ch = aggregate_channels(ords)
+        ch["global"] = {"units": sum(w.get(key, 0) for w in global_sales.values()),
+                        "orders": None, "revenue": None}   # SP-API report parse gives units only
+        channel_sales[key] = ch
+    summary["channelSales"] = channel_sales
+
+    if UNMAPPED_SOURCES:
+        top = sorted(UNMAPPED_SOURCES.items(), key=lambda x: -x[1])[:10]
+        print("  Order sources falling into 'others' (source_type, id): count ->", top)
 
     return {"summary": summary, "products": report}
 

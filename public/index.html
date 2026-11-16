@@ -156,6 +156,8 @@ tbody tr.dead-stock{opacity:0.85}
 .platform-pill.flipkart{background:rgba(47,116,255,0.15);color:#2f74ff}
 .platform-pill.myntra{background:rgba(255,63,108,0.15);color:#ff3f6c}
 .platform-pill.ajio{background:rgba(0,200,150,0.15);color:#00c896}
+.platform-pill.meesho{background:rgba(244,51,151,0.15);color:#f43397}
+.platform-pill.shopify{background:rgba(122,181,92,0.15);color:#7ab55c}
 .platform-pill.global{background:rgba(180,120,255,0.15);color:#b478ff}
 .platform-pill.others{background:rgba(160,160,160,0.15);color:#a0a0a0}
 
@@ -376,6 +378,66 @@ function EolBlock({ products, toggleEol, eolSaving }) {
           </tbody>
         </table>
       )}
+    </div>
+  );
+}
+
+const CHANNEL_META = [
+  ["amazon","Amazon","#ff9900"], ["amazon_vendor","Amazon Vendor","#ffb733"],
+  ["flipkart","Flipkart","#2f74ff"], ["myntra","Myntra","#ff3f6c"],
+  ["ajio","Ajio","#00c896"], ["meesho","Meesho","#f43397"],
+  ["shopify","Shopify (Website)","#7ab55c"], ["global","Global (US/UK/UAE)","#b478ff"],
+  ["others","Others","#a0a0a0"],
+];
+
+function ChannelSales({ data }) {
+  const [win, setWin] = React.useState("d30");
+  const cs = data?.summary?.channelSales?.[win];
+  if (!cs) return null;
+  const rows = CHANNEL_META.map(([k, label, color]) => ({ k, label, color, ...(cs[k] || {units:0, orders:0, revenue:0}) }));
+  const totUnits = rows.reduce((s, r) => s + (r.units || 0), 0) || 1;
+  const totRev   = rows.reduce((s, r) => s + (r.revenue || 0), 0) || 1;
+  const totOrd   = rows.reduce((s, r) => s + (r.orders || 0), 0);
+  const maxRev   = Math.max(...rows.map(r => r.revenue || 0), 1);
+  const inr = n => "₹" + Math.round(n).toLocaleString("en-IN");
+  const th = {textAlign:"right",padding:"6px 10px",fontSize:11,color:"var(--text3)",letterSpacing:1,textTransform:"uppercase"};
+  const td = {textAlign:"right",padding:"7px 10px",fontFamily:"var(--mono)",fontSize:13};
+  return (
+    <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:16,marginBottom:16}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:10}}>
+        <span style={{fontWeight:700,fontSize:14}}>📊 Channel-wise Sales</span>
+        {[["d7","7d"],["d15","15d"],["d30","30d"],["d90","90d"]].map(([k,l]) => (
+          <button key={k} className={`filter-btn ${win===k?"active":""}`} onClick={() => setWin(k)}>{l}</button>
+        ))}
+        <span style={{marginLeft:"auto",fontSize:12,color:"var(--text3)"}}>
+          {inr(totRev)} · {totUnits.toLocaleString("en-IN")} units · {totOrd.toLocaleString("en-IN")} orders (excl. cancelled)
+        </span>
+      </div>
+      <div style={{overflowX:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>
+            <th style={{...th,textAlign:"left"}}>Channel</th><th style={th}>Orders</th><th style={th}>Units</th>
+            <th style={th}>Revenue</th><th style={th}>Rev %</th><th style={{...th,width:"28%"}}></th>
+          </tr></thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.k} style={{borderTop:"1px solid var(--border)"}}>
+                <td style={{...td,textAlign:"left",fontFamily:"inherit",fontWeight:600}}>
+                  <span style={{display:"inline-block",width:9,height:9,borderRadius:2,background:r.color,marginRight:8}}/>{r.label}
+                </td>
+                <td style={td}>{r.orders == null ? "—" : r.orders.toLocaleString("en-IN")}</td>
+                <td style={td}>{(r.units||0).toLocaleString("en-IN")}</td>
+                <td style={td}>{r.revenue == null ? "n/a" : inr(r.revenue)}</td>
+                <td style={td}>{r.revenue == null ? "—" : (100*r.revenue/totRev).toFixed(1)+"%"}</td>
+                <td style={{padding:"7px 10px"}}>
+                  {r.revenue != null && <div style={{height:8,borderRadius:4,background:r.color,width:`${100*r.revenue/maxRev}%`,minWidth:r.revenue>0?3:0}}/>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div style={{fontSize:11,color:"var(--text3)",marginTop:8}}>Revenue = order value as entered in Baselinker (incl. GST). Global shows units only (SP-API report has no ₹ value).</div>
     </div>
   );
 }
@@ -763,7 +825,7 @@ function App() {
   const exportCSV = () => {
     if (!data) return;
     const totalVal = data.summary.totalStockValue || 1;
-    const headers = ["SKU","Name","Stock","Status","Days Left","Velocity/day","7d Sales","15d Sales","30d Sales","90d Sales","Returns 30d","Stock Value","% of Total","Amazon 30d","Amazon Vendor 30d","Flipkart 30d","Myntra 30d","Ajio 30d","Global 30d","Others 30d","Suggested Order"];
+    const headers = ["SKU","Name","Stock","Status","Days Left","Velocity/day","7d Sales","15d Sales","30d Sales","90d Sales","Returns 30d","Stock Value","% of Total","Amazon 30d","Amazon Vendor 30d","Flipkart 30d","Myntra 30d","Ajio 30d","Meesho 30d","Shopify 30d","Global 30d","Others 30d","Suggested Order"];
     const rows = filtered.map(p => {
       const status = (p.isDeadStock && p.status !== "DEAD_STOCK") ? "DEAD_STOCK" : p.status;
       return [
@@ -778,6 +840,8 @@ function App() {
         p.platformSales?.flipkart || 0,
         p.platformSales?.myntra || 0,
         p.platformSales?.ajio || 0,
+        p.platformSales?.meesho || 0,
+        p.platformSales?.shopify || 0,
         p.platformSales?.global || 0,
         p.platformSales?.others || 0,
         Math.ceil((p.suggestedOrder || 0) * seasonalMult),
@@ -931,6 +995,8 @@ function App() {
             );
           })()}
 
+          <ChannelSales data={data}/>
+
           {/* Seasonal multiplier */}
           <div className="seasonal-bar">
             <span className="seasonal-label">🌿 Seasonal Multiplier</span>
@@ -971,7 +1037,7 @@ function App() {
           {/* Platform filter */}
           <div className="controls" style={{marginBottom:16}}>
             <span style={{fontSize:12,color:"var(--text3)",fontWeight:700,letterSpacing:1,textTransform:"uppercase"}}>Platform:</span>
-            {["ALL","amazon","amazon_vendor","flipkart","myntra","ajio","global","others"].map(p => (
+            {["ALL","amazon","amazon_vendor","flipkart","myntra","ajio","meesho","shopify","global","others"].map(p => (
               <button key={p} className={`filter-btn ${platformFilter===p ? "active":""}`}
                 onClick={() => setPlatformFilter(p)}>
                 {p === "ALL" ? "All Platforms" : p === "amazon_vendor" ? "Amazon Vendor" : p === "global" ? "🌐 Global" : p.charAt(0).toUpperCase()+p.slice(1)}
@@ -1083,9 +1149,11 @@ function App() {
                           {(p.platformSales?.flipkart > 0) && <span className="platform-pill flipkart">FL {p.platformSales.flipkart}</span>}
                           {(p.platformSales?.myntra > 0) && <span className="platform-pill myntra">MY {p.platformSales.myntra}</span>}
                           {(p.platformSales?.ajio > 0) && <span className="platform-pill ajio">AJ {p.platformSales.ajio}</span>}
+                          {(p.platformSales?.meesho > 0) && <span className="platform-pill meesho">ME {p.platformSales.meesho}</span>}
+                          {(p.platformSales?.shopify > 0) && <span className="platform-pill shopify">SH {p.platformSales.shopify}</span>}
                           {(p.platformSales?.others > 0) && <span className="platform-pill others">OT {p.platformSales.others}</span>}
                           {(p.platformSales?.global > 0) && <span className="platform-pill global">GL {p.platformSales.global}</span>}
-                          {(!p.platformSales?.amazon && !p.platformSales?.amazon_vendor && !p.platformSales?.flipkart && !p.platformSales?.myntra && !p.platformSales?.ajio && !p.platformSales?.global && !p.platformSales?.others) && <span style={{color:"var(--text3)",fontSize:12}}>—</span>}
+                          {(!p.platformSales?.amazon && !p.platformSales?.amazon_vendor && !p.platformSales?.flipkart && !p.platformSales?.myntra && !p.platformSales?.ajio && !p.platformSales?.meesho && !p.platformSales?.shopify && !p.platformSales?.global && !p.platformSales?.others) && <span style={{color:"var(--text3)",fontSize:12}}>—</span>}
                         </div>
                       </td>
                       <td><span className={p.returns?.d30 > 0 ? "num-danger" : "num"}>{p.returns?.d30 ?? 0}</span></td>
