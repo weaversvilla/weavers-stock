@@ -2,7 +2,6 @@
   "comments": {
     "DP-720-PEACH": "100 order given",
     "DP-720-PISTA": "100 order given",
-    "CAP-SINGLE-GREY": "Order 300 pcs",
     "DINE-PETALS-COFFEE": "Order 30 pcs",
     "DM-PRAYERMAT-BLUE": "Order 200 pcs",
     "DMS-ALIA-BEIGE": "Order 100 pcs",
@@ -18,5 +17,5 @@
     "DP-BARFI-RANI": "200",
     "DP-725-RANI": "200"
   },
-  "updated_at": "2026-11-26T10:26:57.216Z"
+  "updated_at": "2026-11-27T09:15:06.834Z"
 }
