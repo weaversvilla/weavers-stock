@@ -797,9 +797,10 @@ def aggregate_channels(orders, id_to_sku={}):
     Product SKU is the linked Baselinker inventory SKU.
     Breakdown rows: [key, eans, other_skus, name, orders, units, revenue]
       - view "channel": key = channel SKU, other_skus = linked product SKU(s)
-      - view "product": key = product SKU, other_skus = channel SKU(s)"""
+      - view "product": key = product SKU, other_skus = channel SKU(s)
+      - view "ean":     key = single EAN/listing ID, col2 = channel SKU, col3 = product SKU"""
     out = {c: {"units": 0, "orders": 0, "revenue": 0.0} for c in CHANNELS}
-    agg = {c: {"channel": {}, "product": {}} for c in CHANNELS}
+    agg = {c: {"channel": {}, "product": {}, "ean": {}} for c in CHANNELS}
 
     def bump(bucket, key, ean, other, name, q, rev, oid):
         r = bucket.get(key)
@@ -831,6 +832,8 @@ def aggregate_channels(orders, id_to_sku={}):
             name = (p.get("name") or "").strip()
             bump(agg[ch]["channel"], csku, ean, psku, name, q, lrev, oid)
             bump(agg[ch]["product"], psku, ean, csku, name, q, lrev, oid)
+            # one row per EAN / listing ID: col2 = channel SKU, col3 = product SKU
+            bump(agg[ch]["ean"], ean or "(no listing ID)", csku, psku, name, q, lrev, oid)
         out[ch]["units"]   += units
         out[ch]["orders"]  += 1
         out[ch]["revenue"] += rev

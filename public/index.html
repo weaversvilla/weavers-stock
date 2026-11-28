@@ -394,7 +394,7 @@ const CHANNEL_META = [
 function ChannelSales({ data }) {
   const [win, setWin]   = React.useState("d30");
   const [sel, setSel]   = React.useState(null);
-  const [view, setView] = React.useState("channel");
+  const [view, setView] = React.useState("ean");
   const [q, setQ]       = React.useState("");
   const [sortK, setSortK] = React.useState(5);
   const [all, setAll]   = React.useState(false);
@@ -419,12 +419,16 @@ function ChannelSales({ data }) {
   skuRows = [...skuRows].sort((a, b) => (b[sortK] || 0) - (a[sortK] || 0));
   const shown = all ? skuRows : skuRows.slice(0, 100);
   const selLabel = CHANNEL_META.find(m => m[0] === sel)?.[1];
-  const keyLabel   = vEff === "channel" ? "Channel SKU" : "Product SKU";
-  const otherLabel = vEff === "channel" ? "Product SKU" : "Channel SKU(s)";
+  const COLS = {
+    ean:     ["EAN / Listing ID", "Channel SKU", "Product SKU"],
+    channel: ["Channel SKU", "EAN / Listing IDs", "Product SKU"],
+    product: ["Product SKU", "EAN / Listing IDs", "Channel SKU(s)"],
+  }[vEff];
+  const [keyLabel, col2Label, otherLabel] = COLS;
 
   const exportCsv = () => {
     const esc = v => `"${String(v ?? "").replace(/"/g,'""')}"`;
-    const head = [keyLabel, "EAN / Listing ID (from orders)", otherLabel, "Name", "Orders", "Units", "Revenue"];
+    const head = [keyLabel, col2Label, otherLabel, "Name", "Orders", "Units", "Revenue"];
     const csv = [head, ...skuRows].map(r => r.map(esc).join(",")).join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"}));
@@ -479,6 +483,9 @@ function ChannelSales({ data }) {
         <div style={{marginTop:14,borderTop:"1px solid var(--border)",paddingTop:12}}>
           <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:8}}>
             <span style={{fontWeight:700,fontSize:13}}>{selLabel} — SKU breakdown ({win.slice(1)}d)</span>
+            <button className={`filter-btn ${vEff==="ean"?"active":""}`} disabled={sel==="global"}
+                    style={sel==="global" ? {opacity:0.4,cursor:"not-allowed"} : {}}
+                    onClick={() => setView("ean")}>EAN / Listing ID</button>
             <button className={`filter-btn ${vEff==="channel"?"active":""}`} disabled={sel==="global"}
                     style={sel==="global" ? {opacity:0.4,cursor:"not-allowed"} : {}}
                     onClick={() => setView("channel")}>Channel SKU</button>
@@ -495,7 +502,7 @@ function ChannelSales({ data }) {
               <table style={{width:"100%",borderCollapse:"collapse"}}>
                 <thead style={{position:"sticky",top:0,background:"var(--bg2)"}}><tr>
                   <th style={{...th,textAlign:"left"}}>{keyLabel}</th>
-                  <th style={{...th,textAlign:"left"}} title="As received on the order: ASIN for Amazon, FSN/listing ID for Flipkart, style/article ID for Myntra/Ajio">EAN / Listing ID</th>
+                  <th style={{...th,textAlign:"left"}} title="As received on the order: ASIN for Amazon, FSN/listing ID for Flipkart, style/article ID for Myntra/Ajio">{col2Label}</th>
                   <th style={{...th,textAlign:"left"}}>{otherLabel}</th>
                   <th style={{...th,textAlign:"left"}}>Name</th>
                   {sortTh(4,"Orders")}{sortTh(5,"Units")}{sortTh(6,"Revenue")}
@@ -504,7 +511,9 @@ function ChannelSales({ data }) {
                   {shown.map(r => (
                     <tr key={r[0]} style={{borderTop:"1px solid var(--border)"}}>
                       <td style={{...tdL,fontSize:12}}>{r[0]}</td>
-                      <td style={{...tdL,fontSize:12,color:"var(--text2)"}}>{r[1] || "—"}</td>
+                      <td style={{...tdL,fontSize:12,color:"var(--text2)",maxWidth:240,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={r[1]}>
+                        {vEff === "ean" ? (r[1] || "—") : (!r[1] ? "—" : r[1].includes(" / ") ? `${r[1].split(" / ")[0]} +${r[1].split(" / ").length-1} more` : r[1])}
+                      </td>
                       <td style={{...tdL,fontSize:12,color:"var(--text2)",maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={r[2]}>{r[2] || "—"}</td>
                       <td style={{...tdL,fontFamily:"inherit",fontSize:12,maxWidth:280,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={r[3]}>{r[3] || "—"}</td>
                       <td style={td}>{num(r[4])}</td>
